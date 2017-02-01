@@ -7,7 +7,7 @@ COPY . /go/src/app
 RUN \
 	apk add --no-cache git && \
 	go-wrapper download && \
-	go-wrapper install -ldflags "-X github.com/minio/minio/cmd.Version=2017-01-25T03:14:52Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2017-01-25T03-14-52Z -X github.com/minio/minio/cmd.CommitID=f8e4700a11065967242b8857045ce7dee607722d" && \
+	go-wrapper install -ldflags "-X github.com/minio/minio/cmd.Version=2017-02-01T15:51:28Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2017-02-01T15-51-28Z -X github.com/minio/minio/cmd.CommitID=7b1016ca00b89a3c0af0692646be37f68a26b854" && \
 	mkdir -p /export/docker && \
 	rm -rf /go/pkg /go/src && \
 	apk del git
