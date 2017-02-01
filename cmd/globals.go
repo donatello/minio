@@ -82,6 +82,9 @@ var (
 	// Caching is enabled only for RAM size > 8GiB.
 	globalMaxCacheSize = uint64(0)
 
+	// Maximum size of internal objects parts
+	globalPutPartSize = int64(64 * 1024 * 1024)
+
 	// Cache expiry.
 	globalCacheExpiry = objcache.DefaultExpiry
 
@@ -110,11 +113,8 @@ var (
 	// Minio server user agent string.
 	globalServerUserAgent = "Minio/" + ReleaseTag + " (" + runtime.GOOS + "; " + runtime.GOARCH + ")"
 
-	// Access key passed from the environment
-	globalEnvAccessKey = os.Getenv("MINIO_ACCESS_KEY")
-
-	// Secret key passed from the environment
-	globalEnvSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	// Set to true if credentials were passed from env, default is false.
+	globalIsEnvCreds = false
 
 	// url.URL endpoints of disks that belong to the object storage.
 	globalEndpoints = []*url.URL{}
