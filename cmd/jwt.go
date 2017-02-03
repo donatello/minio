@@ -65,8 +65,7 @@ func authenticateJWT(accessKey, secretKey string, expiry time.Duration) (string,
 
 	// Validate secret key.
 	// Using bcrypt to avoid timing attacks.
-	hashedSecretKey, _ := bcrypt.GenerateFromPassword([]byte(serverCred.SecretKey), bcrypt.DefaultCost)
-	if bcrypt.CompareHashAndPassword(hashedSecretKey, []byte(secretKey)) != nil {
+	if bcrypt.CompareHashAndPassword(serverCred.SecretKeyHash, []byte(secretKey)) != nil {
 		return "", errAuthentication
 	}
 
@@ -107,13 +106,13 @@ func isAuthTokenValid(tokenString string) bool {
 }
 
 func isHTTPRequestValid(req *http.Request) bool {
-	return webReqestAuthenticate(req) == nil
+	return webRequestAuthenticate(req) == nil
 }
 
 // Check if the request is authenticated.
 // Returns nil if the request is authenticated. errNoAuthToken if token missing.
 // Returns errAuthentication for all other errors.
-func webReqestAuthenticate(req *http.Request) error {
+func webRequestAuthenticate(req *http.Request) error {
 	jwtToken, err := jwtreq.ParseFromRequest(req, jwtreq.AuthorizationHeaderExtractor, keyFuncCallback)
 	if err != nil {
 		if err == jwtreq.ErrNoTokenInRequest {

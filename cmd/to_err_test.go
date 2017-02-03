@@ -1,5 +1,5 @@
 /*
- * Minio Cloud Storage, (C) 2016 Minio, Inc.
+ * Minio Cloud Storage, (C) 2017 Minio, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,18 @@
  * limitations under the License.
  */
 
-/*
- * Below main package has canonical imports for 'go get' and 'go build'
- * to work with all other clones of github.com/minio/minio repository. For
- * more information refer https://golang.org/doc/go1.4#canonicalimports
- */
+package cmd
 
-package main // import "github.com/minio/minio"
+import "testing"
 
-import (
-	"os"
-
-	minio "github.com/minio/minio/cmd"
-)
-
-func main() {
-	minio.Main(os.Args, os.Exit)
+func TestToErrIsNil(t *testing.T) {
+	if toObjectErr(nil) != nil {
+		t.Errorf("Test expected to return nil, failed instead got a non-nil value %s", toObjectErr(nil))
+	}
+	if toStorageErr(nil) != nil {
+		t.Errorf("Test expected to return nil, failed instead got a non-nil value %s", toStorageErr(nil))
+	}
+	if toAPIErrorCode(nil) != ErrNone {
+		t.Errorf("Test expected error code to be ErrNone, failed instead provided %d", toAPIErrorCode(nil))
+	}
 }
