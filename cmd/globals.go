@@ -59,6 +59,9 @@ const (
 	// can reach that size according to https://aws.amazon.com/articles/1434
 	maxFormFieldSize = int64(1 * humanize.MiByte)
 
+	// Limit memory allocation to store multipart data
+	maxFormMemory = int64(5 * humanize.MiByte)
+
 	// The maximum allowed difference between the request generation time and the server processing time
 	globalMaxSkewTime = 15 * time.Minute
 )
@@ -81,6 +84,9 @@ var (
 	// Maximum cache size. Defaults to disabled.
 	// Caching is enabled only for RAM size > 8GiB.
 	globalMaxCacheSize = uint64(0)
+
+	// Maximum size of internal objects parts
+	globalPutPartSize = int64(64 * 1024 * 1024)
 
 	// Cache expiry.
 	globalCacheExpiry = objcache.DefaultExpiry
@@ -110,11 +116,8 @@ var (
 	// Minio server user agent string.
 	globalServerUserAgent = "Minio/" + ReleaseTag + " (" + runtime.GOOS + "; " + runtime.GOARCH + ")"
 
-	// Access key passed from the environment
-	globalEnvAccessKey = os.Getenv("MINIO_ACCESS_KEY")
-
-	// Secret key passed from the environment
-	globalEnvSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	// Set to true if credentials were passed from env, default is false.
+	globalIsEnvCreds = false
 
 	// url.URL endpoints of disks that belong to the object storage.
 	globalEndpoints = []*url.URL{}

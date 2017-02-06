@@ -151,7 +151,7 @@ func (web *webAPIHandlers) ListBuckets(r *http.Request, args *WebGenericArgs, re
 	if objectAPI == nil {
 		return toJSONError(errServerNotInitialized)
 	}
-	authErr := webReqestAuthenticate(r)
+	authErr := webRequestAuthenticate(r)
 	if authErr != nil {
 		return toJSONError(authErr)
 	}
@@ -208,7 +208,7 @@ func (web *webAPIHandlers) ListObjects(r *http.Request, args *ListObjectsArgs, r
 	prefix := args.Prefix + "test" // To test if GetObject/PutObject with the specified prefix is allowed.
 	readable := isBucketActionAllowed("s3:GetObject", args.BucketName, prefix)
 	writable := isBucketActionAllowed("s3:PutObject", args.BucketName, prefix)
-	authErr := webReqestAuthenticate(r)
+	authErr := webRequestAuthenticate(r)
 	switch {
 	case authErr == errAuthentication:
 		return toJSONError(authErr)
@@ -363,16 +363,18 @@ func (web *webAPIHandlers) SetAuth(r *http.Request, args *SetAuthArgs, reply *Se
 	}
 
 	// As we already validated the authentication, we save given access/secret keys.
-	cred, err := getCredential(args.AccessKey, args.SecretKey)
+	creds, err := getCredential(args.AccessKey, args.SecretKey)
 	if err != nil {
 		return toJSONError(err)
 	}
 
 	// Notify all other Minio peers to update credentials
-	errsMap := updateCredsOnPeers(cred)
+	errsMap := updateCredsOnPeers(creds)
 
 	// Update local credentials
-	serverConfig.SetCredential(cred)
+	serverConfig.SetCredential(creds)
+
+	// Persist updated credentials.
 	if err = serverConfig.Save(); err != nil {
 		errsMap[globalMinioAddr] = err
 	}
@@ -444,13 +446,20 @@ func (web *webAPIHandlers) Upload(w http.ResponseWriter, r *http.Request) {
 	bucket := vars["bucket"]
 	object := vars["object"]
 
-	authErr := webReqestAuthenticate(r)
+	authErr := webRequestAuthenticate(r)
 	if authErr == errAuthentication {
 		writeWebErrorResponse(w, errAuthentication)
 		return
 	}
 	if authErr != nil && !isBucketActionAllowed("s3:PutObject", bucket, object) {
 		writeWebErrorResponse(w, errAuthentication)
+		return
+	}
+
+	// Require Content-Length to be set in the request
+	size := r.ContentLength
+	if size < 0 {
+		writeWebErrorResponse(w, errSizeUnspecified)
 		return
 	}
 
@@ -463,7 +472,7 @@ func (web *webAPIHandlers) Upload(w http.ResponseWriter, r *http.Request) {
 	defer objectLock.Unlock()
 
 	sha256sum := ""
-	objInfo, err := objectAPI.PutObject(bucket, object, -1, r.Body, metadata, sha256sum)
+	objInfo, err := objectAPI.PutObject(bucket, object, size, r.Body, metadata, sha256sum)
 	if err != nil {
 		writeWebErrorResponse(w, err)
 		return
@@ -506,14 +515,7 @@ func (web *webAPIHandlers) Download(w http.ResponseWriter, r *http.Request) {
 	objectLock.RLock()
 	defer objectLock.RUnlock()
 
-	objInfo, err := objectAPI.GetObjectInfo(bucket, object)
-	if err != nil {
-		writeWebErrorResponse(w, err)
-		return
-	}
-	offset := int64(0)
-	err = objectAPI.GetObject(bucket, object, offset, objInfo.Size, w)
-	if err != nil {
+	if err := objectAPI.GetObject(bucket, object, 0, -1, w); err != nil {
 		/// No need to print error, response writer already written to.
 		return
 	}
@@ -819,6 +821,12 @@ func toWebAPIError(err error) APIError {
 		return APIError{
 			Code:           "AccessDenied",
 			HTTPStatusCode: http.StatusForbidden,
+			Description:    err.Error(),
+		}
+	} else if err == errSizeUnspecified {
+		return APIError{
+			Code:           "InvalidRequest",
+			HTTPStatusCode: http.StatusBadRequest,
 			Description:    err.Error(),
 		}
 	}
