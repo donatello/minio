@@ -1,5 +1,5 @@
 /*
- * Minio Cloud Storage, (C) 2016 Minio, Inc.
+ * Minio Cloud Storage, (C) 2017 Minio, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,16 @@
 
 package cmd
 
-import "strings"
+import "testing"
 
-// List of reserved words for files, includes old and new ones.
-var posixReservedPrefix = []string{
-	"$tmpfile",
-	// Add new reserved words if any used in future.
-}
-
-// hasPosixReservedPrefix - has reserved prefix.
-func hasPosixReservedPrefix(name string) (isReserved bool) {
-	for _, reservedKey := range posixReservedPrefix {
-		if strings.HasPrefix(name, reservedKey) {
-			isReserved = true
-			break
-		}
+func TestToErrIsNil(t *testing.T) {
+	if toObjectErr(nil) != nil {
+		t.Errorf("Test expected to return nil, failed instead got a non-nil value %s", toObjectErr(nil))
 	}
-
-	return isReserved
+	if toStorageErr(nil) != nil {
+		t.Errorf("Test expected to return nil, failed instead got a non-nil value %s", toStorageErr(nil))
+	}
+	if toAPIErrorCode(nil) != ErrNone {
+		t.Errorf("Test expected error code to be ErrNone, failed instead provided %d", toAPIErrorCode(nil))
+	}
 }
