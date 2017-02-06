@@ -483,7 +483,7 @@ var errorCodeResponse = map[APIErrorCode]APIError{
 	},
 	ErrInvalidDuration: {
 		Code:           "InvalidDuration",
-		Description:    "Relative duration provided in the request is invalid.",
+		Description:    "Duration provided in the request is invalid.",
 		HTTPStatusCode: http.StatusBadRequest,
 	},
 
@@ -606,6 +606,11 @@ func toAPIErrorCode(err error) (apiErr APIErrorCode) {
 		apiErr = ErrSignatureDoesNotMatch
 	case errContentSHA256Mismatch:
 		apiErr = ErrContentSHA256Mismatch
+	case errDataTooLarge:
+		apiErr = ErrEntityTooLarge
+	case errDataTooSmall:
+		apiErr = ErrEntityTooSmall
+
 	}
 
 	if apiErr != ErrNone {
