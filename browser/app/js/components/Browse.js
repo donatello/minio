@@ -296,11 +296,6 @@ export default class Browse extends React.Component {
     browserHistory.push(`${minioBrowserPrefix}/login`)
   }
 
-  landingPage(e) {
-    e.preventDefault()
-    this.props.dispatch(actions.selectBucket(this.props.buckets[0]))
-  }
-
   fullScreen(e) {
     e.preventDefault()
     let el = document.documentElement
@@ -414,10 +409,10 @@ export default class Browse extends React.Component {
     let freePercent = free * 100 / total
 
     if (web.LoggedIn()) {
-      browserDropdownButton = <BrowserDropdown fullScreen={ this.fullScreen.bind(this) }
-                                showAbout={ this.showAbout.bind(this) }
-                                showSettings={ this.showSettings.bind(this) }
-                                logout={ this.logout.bind(this) } />
+      browserDropdownButton = <BrowserDropdown fullScreenFunc={ this.fullScreen.bind(this) }
+                                aboutFunc={ this.showAbout.bind(this) }
+                                settingsFunc={ this.showSettings.bind(this) }
+                                logoutFunc={ this.logout.bind(this) } />
     } else {
       loginButton = <a className='btn btn-danger' href='/minio/login'>Login</a>
     }
@@ -489,8 +484,7 @@ export default class Browse extends React.Component {
                    'file-explorer': true,
                    'toggled': sidebarStatus
                  }) }>
-        <SideBar landingPage={ this.landingPage.bind(this) }
-          searchBuckets={ this.searchBuckets.bind(this) }
+        <SideBar searchBuckets={ this.searchBuckets.bind(this) }
           selectBucket={ this.selectBucket.bind(this) }
           clickOutside={ this.hideSidebar.bind(this) }
           showPolicy={ this.showBucketPolicy.bind(this) } />
