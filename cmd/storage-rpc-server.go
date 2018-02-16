@@ -18,10 +18,12 @@ package cmd
 
 import (
 	"io"
+	"io/ioutil"
 	"path"
 	"time"
 
 	router "github.com/gorilla/mux"
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/disk"
 	"github.com/minio/minio/pkg/errors"
 )
@@ -151,8 +153,11 @@ func (s *storageServer) ReadFileHandler(args *ReadFileArgs, reply *[]byte) (err 
 		verifier = NewBitrotVerifier(args.Algo, args.ExpectedHash)
 	}
 
-	var n int64
-	n, err = s.storage.ReadFile(args.Vol, args.Path, args.Offset, args.Buffer, verifier)
+	// Create a ChunkedBuffer with the desired capacity and call
+	// ReadFile()
+	readLength := args.Buffer.GetCapacity()
+	cb := cb.NewChunkedBuffer(readLength)
+	_, err = s.storage.ReadFile(args.Vol, args.Path, args.Offset, cb, verifier)
 	// Sending an error over the rpc layer, would cause unmarshalling to fail. In situations
 	// when we have short read i.e `io.ErrUnexpectedEOF` treat it as good condition and copy
 	// the buffer properly.
@@ -160,7 +165,10 @@ func (s *storageServer) ReadFileHandler(args *ReadFileArgs, reply *[]byte) (err 
 		// Reset to nil as good condition.
 		err = nil
 	}
-	*reply = args.Buffer[0:n]
+
+	var buf []byte
+	buf, err = ioutil.ReadAll(cb)
+	*reply = buf
 	return err
 }
 

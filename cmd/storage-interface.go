@@ -19,6 +19,7 @@ package cmd
 import (
 	"io"
 
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/disk"
 )
 
@@ -40,7 +41,7 @@ type StorageAPI interface {
 
 	// File operations.
 	ListDir(volume, dirPath string) ([]string, error)
-	ReadFile(volume string, path string, offset int64, buf []byte, verifier *BitrotVerifier) (n int64, err error)
+	ReadFile(volume, path string, offset int64, buf *cb.ChunkedBuffer, verifier *BitrotVerifier) (n int64, err error)
 	PrepareFile(volume string, path string, len int64) (err error)
 	AppendFile(volume string, path string, buf []byte) (err error)
 	RenameFile(srcVolume, srcPath, dstVolume, dstPath string) error
@@ -59,7 +60,8 @@ type storageReader struct {
 }
 
 func (r *storageReader) Read(p []byte) (n int, err error) {
-	nn, err := r.storage.ReadFile(r.volume, r.path, r.offset, p, nil)
+	buf := cb.NewChunkedBuffer(int64(len(p)))
+	nn, err := r.storage.ReadFile(r.volume, r.path, r.offset, buf, nil)
 	r.offset += nn
 	n = int(nn)
 

@@ -30,6 +30,7 @@ import (
 	"syscall"
 
 	humanize "github.com/dustin/go-humanize"
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/disk"
 )
 
@@ -549,7 +550,7 @@ func (s *posix) ReadAll(volume, path string) (buf []byte, err error) {
 //
 // Additionally ReadFile also starts reading from an offset. ReadFile
 // semantics are same as io.ReadFull.
-func (s *posix) ReadFile(volume, path string, offset int64, buffer []byte, verifier *BitrotVerifier) (n int64, err error) {
+func (s *posix) ReadFile(volume, path string, offset int64, buffer *cb.ChunkedBuffer, verifier *BitrotVerifier) (n int64, err error) {
 	defer func() {
 		if err == syscall.EIO {
 			atomic.AddInt32(&s.ioErrCount, 1)
@@ -610,35 +611,51 @@ func (s *posix) ReadFile(volume, path string, offset int64, buffer []byte, verif
 		return 0, errIsNotRegular
 	}
 
-	if verifier != nil && !verifier.IsVerified() {
+	if verifier != nil {
 		bufp := s.pool.Get().(*[]byte)
 		defer s.pool.Put(bufp)
 
 		if offset != 0 {
+			// copy data upto offset into verifier
 			if _, err = io.CopyBuffer(verifier, io.LimitReader(file, offset), *bufp); err != nil {
 				return 0, err
 			}
 		}
-		if _, err = file.Read(buffer); err != nil {
+		w := io.MultiWriter(verifier, buffer)
+
+		// copy requested data into verifier + chunked-buffer
+		// via multi-writer
+		n, err := io.CopyN(w, file, int64(buffer.GetCapacity()))
+		if err != nil {
 			return 0, err
 		}
-		if _, err = verifier.Write(buffer); err != nil {
+
+		// copy remaining data from file into verifier
+		_, err = io.Copy(verifier, file)
+		if err != nil {
 			return 0, err
 		}
-		if _, err = io.CopyBuffer(verifier, file, *bufp); err != nil {
-			return 0, err
-		}
+
 		if !verifier.Verify() {
-			return 0, hashMismatchError{hex.EncodeToString(verifier.sum), hex.EncodeToString(verifier.Sum(nil))}
+			return 0, hashMismatchError{
+				hex.EncodeToString(verifier.sum),
+				hex.EncodeToString(verifier.Sum(nil)),
+			}
 		}
-		return int64(len(buffer)), err
+
+		return n, nil
 	}
 
-	m, err := file.ReadAt(buffer, offset)
-	if m > 0 && m < len(buffer) {
+	_, err = file.Seek(offset, 0)
+	if err != nil {
+		return 0, err
+	}
+	cap := int64(buffer.GetCapacity())
+	m, err := io.CopyN(buffer, file, cap)
+	if m > 0 && m < cap {
 		err = io.ErrUnexpectedEOF
 	}
-	return int64(m), err
+	return m, err
 }
 
 func (s *posix) createFile(volume, path string) (f *os.File, err error) {

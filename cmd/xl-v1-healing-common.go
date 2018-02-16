@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"time"
 
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/errors"
 )
 
@@ -154,7 +155,7 @@ func disksWithAllParts(onlineDisks []StorageAPI, partsMetadata []xlMetaV1, errs 
 	object string) ([]StorageAPI, []error, error) {
 
 	availableDisks := make([]StorageAPI, len(onlineDisks))
-	buffer := []byte{}
+	buffer := cb.NewChunkedBuffer(0)
 	dataErrs := make([]error, len(onlineDisks))
 
 	for i, onlineDisk := range onlineDisks {
@@ -170,8 +171,8 @@ func disksWithAllParts(onlineDisks []StorageAPI, partsMetadata []xlMetaV1, errs 
 			checksumInfo := partsMetadata[i].Erasure.GetChecksumInfo(part.Name)
 			verifier := NewBitrotVerifier(checksumInfo.Algorithm, checksumInfo.Hash)
 
-			// verification happens even if a 0-length
-			// buffer is passed
+			// verification happens even if a 0-capacity
+			// chunked-buffer is passed
 			_, hErr := onlineDisk.ReadFile(bucket, partPath, 0, buffer, verifier)
 
 			_, isCorrupt := hErr.(hashMismatchError)

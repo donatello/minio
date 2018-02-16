@@ -279,7 +279,8 @@ func (xl xlObjects) getObject(bucket, object string, startOffset int64, length i
 	}
 
 	var totalBytesRead int64
-	storage, err := NewErasureStorage(onlineDisks, xlMeta.Erasure.DataBlocks, xlMeta.Erasure.ParityBlocks, xlMeta.Erasure.BlockSize)
+	storage, err := NewErasureStorage(onlineDisks, xlMeta.Erasure.DataBlocks,
+		xlMeta.Erasure.ParityBlocks, xlMeta.Erasure.BlockSize)
 	if err != nil {
 		return toObjectErr(err, bucket, object)
 	}

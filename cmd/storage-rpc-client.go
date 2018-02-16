@@ -24,6 +24,7 @@ import (
 	"path"
 	"strings"
 
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/disk"
 )
 
@@ -251,7 +252,9 @@ func (n *networkStorage) ReadAll(volume, path string) (buf []byte, err error) {
 }
 
 // ReadFile - reads a file at remote path and fills the buffer.
-func (n *networkStorage) ReadFile(volume string, path string, offset int64, buffer []byte, verifier *BitrotVerifier) (m int64, err error) {
+func (n *networkStorage) ReadFile(volume string, path string, offset int64,
+	cb *cb.ChunkedBuffer, verifier *BitrotVerifier) (m int64, err error) {
+
 	defer func() {
 		if r := recover(); r != nil {
 			// Recover any panic from allocation, and return error.
@@ -263,7 +266,7 @@ func (n *networkStorage) ReadFile(volume string, path string, offset int64, buff
 		Vol:      volume,
 		Path:     path,
 		Offset:   offset,
-		Buffer:   buffer,
+		Buffer:   cb,
 		Verified: true, // mark read as verified by default
 	}
 	if verifier != nil {
@@ -274,12 +277,13 @@ func (n *networkStorage) ReadFile(volume string, path string, offset int64, buff
 
 	var result []byte
 	err = n.call("Storage.ReadFileHandler", &args, &result)
-
-	// Copy results to buffer.
-	copy(buffer, result)
-
-	// Return length of result, err if any.
-	return int64(len(result)), err
+	if err != nil {
+		return
+	}
+	var t int
+	t, err = cb.Write(result)
+	m = int64(t)
+	return
 }
 
 // ListDir - list all entries at prefix.

@@ -25,6 +25,7 @@ import (
 
 	"github.com/minio/cli"
 	"github.com/minio/dsync"
+	cb "github.com/minio/minio/pkg/chunkedbuffers"
 	"github.com/minio/minio/pkg/errors"
 	miniohttp "github.com/minio/minio/pkg/http"
 )
@@ -129,10 +130,15 @@ func serverHandleCmdArgs(ctx *cli.Context) {
 		fatalIf(checkPortAvailability(globalMinioPort), "Port %d already in use", globalMinioPort)
 	}
 
-	globalIsXL = (setupType == XLSetupType)
 	globalIsDistXL = (setupType == DistXLSetupType)
-	if globalIsDistXL {
+	if setupType == XLSetupType || globalIsDistXL {
 		globalIsXL = true
+	}
+	if globalIsXL {
+		err = cb.InitChunkedAllocator(int64(blockSizeV1))
+		if err != nil {
+			fatalIf(err, "could not initialize the chunked allocator - please report a bug.")
+		}
 	}
 }
 
