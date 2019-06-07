@@ -435,17 +435,16 @@ func (sts *stsAPIHandlers) AssumeRoleWithKerberosIdentity(w http.ResponseWriter,
 		return
 	}
 
-	clientPrincipal := strings.Join(creds.CName().NameString, ".") + "@" + creds.Realm()
 	expTime := APReq.Ticket.DecryptedEncPart.EndTime
 	if expTime.IsZero() {
 		logger.LogIf(ctx, fmt.Errorf("Service Ticket does not have an expiry time"))
 		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
 		return
 	}
+	clientPrincipal := strings.Join(creds.CName().NameString, ".") + "@" + creds.Realm()
 	m := map[string]interface{}{
-		"exp":                expTime.Unix(),
-		"policy":             "readwrite",
-		"kerberos_principal": clientPrincipal,
+		"exp":          expTime.Unix(),
+		iamKrbPrincKey: clientPrincipal,
 	}
 
 	secret := globalServerConfig.GetCredential().SecretKey

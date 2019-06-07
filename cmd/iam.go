@@ -46,11 +46,18 @@ const (
 	// IAM sts directory.
 	iamConfigSTSPrefix = iamConfigPrefix + "/sts/"
 
+	// IAM sts kerberos policies prefix
+	iamConfigSTSKrbPoliciesPrefix = iamConfigPrefix + "/sts-krb/"
+
 	// IAM identity file which captures identity credentials.
 	iamIdentityFile = "identity.json"
 
 	// IAM policy file which provides policies for each users.
 	iamPolicyFile = "policy.json"
+
+	// Key used in session token to indicate kerberos user
+	// principal
+	iamKrbPrincKey = "krb_princ"
 )
 
 // IAMSys - config system.
@@ -59,6 +66,9 @@ type IAMSys struct {
 	iamUsersMap        map[string]auth.Credentials
 	iamPolicyMap       map[string]string
 	iamCannedPolicyMap map[string]iampolicy.Policy
+
+        // Map krb principal to policy name
+	iamKrbPolicyMap map[string]string
 }
 
 // LoadPolicy - reloads a specific canned policy from backend disks or etcd.
@@ -468,6 +478,36 @@ func (sys *IAMSys) SetTempUser(accessKey string, cred auth.Credentials, policyNa
 	return nil
 }
 
+// SetSTSKrbUserPolicy - sets user policy for STS Kerberos user
+// principal.
+func (sys *IAMSys) SetSTSKrbUserPolicy(krbPrincipal string, policyName string) error {
+	objectAPI := newObjectLayerFn()
+	if objectAPI == nil {
+		return errServerNotInitialized
+	}
+
+	sys.Lock()
+	defer sys.Unlock()
+
+	data, err := json.Marshal(policyName)
+	if err != nil {
+		return err
+	}
+
+	configFile := pathJoin(iamConfigSTSKrbPoliciesPrefix, krbPrincipal, iamPolicyFile)
+	if globalEtcdClient != nil {
+		err = saveConfigEtcd(context.Background(), globalEtcdClient, configFile, data)
+	} else {
+		err = saveConfig(context.Background(), objectAPI, configFile, data)
+	}
+	if err != nil {
+		return err
+	}
+
+	sys.iamKrbPolicyMap[krbPrincipal] = policyName
+	return nil
+}
+
 // GetUserPolicy - returns canned policy name associated with a user.
 func (sys *IAMSys) GetUserPolicy(accessKey string) (policyName string, err error) {
 	objectAPI := newObjectLayerFn()
@@ -659,8 +699,16 @@ func (sys *IAMSys) IsAllowed(args iampolicy.Args) bool {
 		return globalPolicyOPA.IsAllowed(args)
 	}
 
-	// If policy is available for given user, check the policy.
-	if name, found := sys.iamPolicyMap[args.AccountName]; found {
+	// Check if krb princ is present and if so find policy
+	if princI, ok := args.Claims[iamKrbPrincKey]; ok {
+		princ := princI.(string)
+		if pname, ok := sys.iamKrbPolicyMap[princ]; ok {
+			p, ok := sys.iamCannedPolicyMap[pname]
+			return ok && p.IsAllowed(args)
+		}
+		return false
+	} else if name, found := sys.iamPolicyMap[args.AccountName]; found {
+		// If policy is available for given user, check the policy.
 		p, ok := sys.iamCannedPolicyMap[name]
 		return ok && p.IsAllowed(args)
 	}
@@ -673,7 +721,7 @@ var defaultContextTimeout = 30 * time.Second
 
 func etcdKvsToSet(prefix string, kvs []*mvccpb.KeyValue) set.StringSet {
 	users := set.NewStringSet()
-	for _, kv := range kvs {
+	for _, kv := range r.Kvs {
 		// Extract user by stripping off the `prefix` value as suffix,
 		// then strip off the remaining basename to obtain the prefix
 		// value, usually in the following form.
@@ -745,7 +793,13 @@ func reloadEtcdPolicies(prefix string, cannedPolicyMap map[string]iampolicy.Poli
 
 	// Reload config and policies for all policys.
 	for _, policyName := range policies.ToSlice() {
-		if err = reloadEtcdPolicy(ctx, prefix, policyName, cannedPolicyMap); err != nil {
+		pFile := pathJoin(prefix, policyName, iamPolicyFile)
+		pdata, perr := readConfigEtcd(ctx, globalEtcdClient, pFile)
+		if perr != nil {
+			return perr
+		}
+		var p iampolicy.Policy
+		if err = json.Unmarshal(pdata, &p); err != nil {
 			return err
 		}
 	}
@@ -914,6 +968,7 @@ func (sys *IAMSys) refreshEtcd() error {
 	iamUsersMap := make(map[string]auth.Credentials)
 	iamPolicyMap := make(map[string]string)
 	iamCannedPolicyMap := make(map[string]iampolicy.Policy)
+	iamKrbPolicyMap := make(map[string]string)
 
 	if err := reloadEtcdPolicies(iamConfigPoliciesPrefix, iamCannedPolicyMap); err != nil {
 		return err
@@ -924,6 +979,9 @@ func (sys *IAMSys) refreshEtcd() error {
 	if err := reloadEtcdUsers(iamConfigSTSPrefix, iamUsersMap, iamPolicyMap); err != nil {
 		return err
 	}
+	if err := reloadEtcdUsers(iamConfigSTSKrbPoliciesPrefix, nil, iamKrbPolicyMap); err != nil {
+		return err
+	}
 
 	// Sets default canned policies, if none are set.
 	setDefaultCannedPolicies(iamCannedPolicyMap)
@@ -934,6 +992,7 @@ func (sys *IAMSys) refreshEtcd() error {
 	sys.iamUsersMap = iamUsersMap
 	sys.iamPolicyMap = iamPolicyMap
 	sys.iamCannedPolicyMap = iamCannedPolicyMap
+	sys.iamKrbPolicyMap = iamKrbPolicyMap
 
 	return nil
 }
@@ -943,6 +1002,7 @@ func (sys *IAMSys) refresh(objAPI ObjectLayer) error {
 	iamUsersMap := make(map[string]auth.Credentials)
 	iamPolicyMap := make(map[string]string)
 	iamCannedPolicyMap := make(map[string]iampolicy.Policy)
+	iamKrbPolicyMap := make(map[string]string)
 
 	if err := reloadPolicies(objAPI, iamConfigPoliciesPrefix, iamCannedPolicyMap); err != nil {
 		return err
@@ -953,6 +1013,9 @@ func (sys *IAMSys) refresh(objAPI ObjectLayer) error {
 	if err := reloadUsers(objAPI, iamConfigSTSPrefix, iamUsersMap, iamPolicyMap); err != nil {
 		return err
 	}
+	if err := reloadUsers(objAPI, iamConfigSTSKrbPoliciesPrefix, nil, iamKrbPolicyMap); err != nil {
+		return err
+	}
 
 	// Sets default canned policies, if none are set.
 	setDefaultCannedPolicies(iamCannedPolicyMap)
@@ -963,6 +1026,7 @@ func (sys *IAMSys) refresh(objAPI ObjectLayer) error {
 	sys.iamUsersMap = iamUsersMap
 	sys.iamPolicyMap = iamPolicyMap
 	sys.iamCannedPolicyMap = iamCannedPolicyMap
+	sys.iamKrbPolicyMap = iamKrbPolicyMap
 
 	return nil
 }
@@ -973,5 +1037,6 @@ func NewIAMSys() *IAMSys {
 		iamUsersMap:        make(map[string]auth.Credentials),
 		iamPolicyMap:       make(map[string]string),
 		iamCannedPolicyMap: make(map[string]iampolicy.Policy),
+		iamKrbPolicyMap:    make(map[string]string),
 	}
 }
