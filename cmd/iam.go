@@ -67,7 +67,7 @@ type IAMSys struct {
 	iamPolicyMap       map[string]string
 	iamCannedPolicyMap map[string]iampolicy.Policy
 
-        // Map krb principal to policy name
+	// Map krb principal to policy name
 	iamKrbPolicyMap map[string]string
 }
 
@@ -721,7 +721,7 @@ var defaultContextTimeout = 30 * time.Second
 
 func etcdKvsToSet(prefix string, kvs []*mvccpb.KeyValue) set.StringSet {
 	users := set.NewStringSet()
-	for _, kv := range r.Kvs {
+	for _, kv := range kvs {
 		// Extract user by stripping off the `prefix` value as suffix,
 		// then strip off the remaining basename to obtain the prefix
 		// value, usually in the following form.
@@ -793,13 +793,7 @@ func reloadEtcdPolicies(prefix string, cannedPolicyMap map[string]iampolicy.Poli
 
 	// Reload config and policies for all policys.
 	for _, policyName := range policies.ToSlice() {
-		pFile := pathJoin(prefix, policyName, iamPolicyFile)
-		pdata, perr := readConfigEtcd(ctx, globalEtcdClient, pFile)
-		if perr != nil {
-			return perr
-		}
-		var p iampolicy.Policy
-		if err = json.Unmarshal(pdata, &p); err != nil {
+		if err = reloadEtcdPolicy(ctx, prefix, policyName, cannedPolicyMap); err != nil {
 			return err
 		}
 	}

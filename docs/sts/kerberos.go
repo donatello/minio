@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/minio/gokrb5/config"
+	"github.com/minio/gokrb5/v7/config"
 	"github.com/minio/minio-go"
 	cr "github.com/minio/minio-go/pkg/credentials"
 )

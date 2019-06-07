@@ -24,8 +24,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/minio/gokrb5/keytab"
-	"github.com/minio/gokrb5/service"
+	"github.com/minio/gokrb5/v7/keytab"
+	"github.com/minio/gokrb5/v7/service"
 	"github.com/minio/minio/cmd/crypto"
 	xhttp "github.com/minio/minio/cmd/http"
 	"github.com/minio/minio/cmd/logger"
