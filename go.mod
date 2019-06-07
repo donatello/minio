@@ -40,7 +40,6 @@ require (
 	github.com/hashicorp/vault v1.1.0
 	github.com/howeyc/gopass v0.0.0-20170109162249-bf9dde6d0d2c // indirect
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
-	github.com/jcmturner/gofork v0.0.0-20190328161633-dc7c13fece03 // indirect
 	github.com/jonboulle/clockwork v0.1.0 // indirect
 	github.com/json-iterator/go v1.1.6
 	github.com/klauspost/compress v1.4.1 // indirect
@@ -55,7 +54,7 @@ require (
 	github.com/minio/blazer v0.0.0-20171126203752-2081f5bf0465
 	github.com/minio/cli v1.20.0
 	github.com/minio/dsync v1.0.0
-	github.com/minio/gokrb5 v7.2.3+incompatible
+	github.com/minio/gokrb5/v7 v7.2.5
 	github.com/minio/hdfs/v3 v3.0.0
 	github.com/minio/highwayhash v1.0.0
 	github.com/minio/lsync v0.0.0-20190207022115-a4e43e3d0887
@@ -104,9 +103,6 @@ require (
 	gopkg.in/Shopify/sarama.v1 v1.20.0
 	gopkg.in/cheggaaa/pb.v1 v1.0.28 // indirect
 	gopkg.in/jcmturner/goidentity.v2 v2.0.0 // indirect
-	gopkg.in/jcmturner/goidentity.v3 v3.0.0 // indirect
-	gopkg.in/jcmturner/gokrb5.v7 v7.2.4 // indirect
-	gopkg.in/jcmturner/rpc.v1 v1.1.0 // indirect
 	gopkg.in/olivere/elastic.v5 v5.0.80
 	gopkg.in/yaml.v2 v2.2.2
 )

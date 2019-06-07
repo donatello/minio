@@ -24,8 +24,8 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/minio/gokrb5/messages"
-	"github.com/minio/gokrb5/service"
+	"github.com/minio/gokrb5/v7/messages"
+	"github.com/minio/gokrb5/v7/service"
 	"github.com/minio/minio/cmd/logger"
 	"github.com/minio/minio/pkg/auth"
 	"github.com/minio/minio/pkg/iam/validator"

@@ -19,7 +19,7 @@ package cmd
 import (
 	"sync"
 
-	"github.com/minio/gokrb5/service"
+	"github.com/minio/gokrb5/v7/service"
 	"github.com/minio/minio/cmd/crypto"
 	"github.com/minio/minio/pkg/auth"
 	"github.com/minio/minio/pkg/event/target"
