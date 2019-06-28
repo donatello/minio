@@ -30,7 +30,7 @@ import (
 	"github.com/minio/minio/pkg/auth"
 	"github.com/minio/minio/pkg/event"
 	"github.com/minio/minio/pkg/event/target"
-	"github.com/minio/minio/pkg/iam/policy"
+	iampolicy "github.com/minio/minio/pkg/iam/policy"
 	"github.com/minio/minio/pkg/iam/validator"
 	xnet "github.com/minio/minio/pkg/net"
 )
@@ -293,6 +293,7 @@ func (s *serverConfig) loadFromEnvs() {
 			s.Policy.OPA.AuthToken = os.Getenv("MINIO_IAM_OPA_AUTHTOKEN")
 		}
 	}
+	s.LDAPServerConfig = newLDAPConfigFromEnv()
 }
 
 // TestNotificationTargets tries to establish connections to all notification

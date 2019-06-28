@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	xhttp "github.com/minio/minio/cmd/http"
@@ -39,6 +40,7 @@ const (
 	// STS API action constants
 	clientGrants = "AssumeRoleWithClientGrants"
 	webIdentity  = "AssumeRoleWithWebIdentity"
+	ldapIdentity = "AssumeRoleWithLDAPIdentity"
 	assumeRole   = "AssumeRole"
 )
 
@@ -80,6 +82,12 @@ func registerSTSRouter(router *mux.Router) {
 		Queries("Version", stsAPIVersion).
 		Queries("WebIdentityToken", "{Token:.*}")
 
+	// AssumeRoleWithLDAPIdentity
+	stsRouter.Methods("POST").HandlerFunc(httpTraceAll(sts.AssumeRoleWithLDAPIdentity)).
+		Queries("Action", ldapIdentity).
+		Queries("Version", stsAPIVersion).
+		Queries("LDAPUsername", "{LDAPUsername:.*}").
+		Queries("LDAPPassword", "{LDAPPassword:.*}")
 }
 
 func checkAssumeRoleAuth(ctx context.Context, r *http.Request) (user auth.Credentials, stsErr STSErrorCode) {
@@ -403,4 +411,102 @@ func (sts *stsAPIHandlers) AssumeRoleWithWebIdentity(w http.ResponseWriter, r *h
 //    $ curl https://minio:9000/?Action=AssumeRoleWithClientGrants&Token=<jwt>
 func (sts *stsAPIHandlers) AssumeRoleWithClientGrants(w http.ResponseWriter, r *http.Request) {
 	sts.AssumeRoleWithJWT(w, r)
+}
+
+// AssumeRoleWithLDAPIdentity - implements user auth against LDAP server
+func (sts *stsAPIHandlers) AssumeRoleWithLDAPIdentity(w http.ResponseWriter, r *http.Request) {
+	ctx := newContext(r, w, "AssumeRoleWithLDAPIdentity")
+
+	// Parse the incoming form data.
+	if err := r.ParseForm(); err != nil {
+		logger.LogIf(ctx, err)
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
+		return
+	}
+
+	if r.Form.Get("Version") != stsAPIVersion {
+		logger.LogIf(ctx, fmt.Errorf("Invalid STS API version %s, expecting %s", r.Form.Get("Version"), stsAPIVersion))
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSMissingParameter))
+		return
+	}
+
+	action := r.Form.Get("Action")
+	switch action {
+	case ldapIdentity:
+	default:
+		logger.LogIf(ctx, fmt.Errorf("Unsupported action %s", action))
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
+		return
+	}
+
+	ctx = newContext(r, w, action)
+	defer logger.AuditLog(w, r, action, nil)
+
+	ldapUsername := r.Form.Get("LDAPUsername")
+	ldapPassword := r.Form.Get("LDAPPassword")
+
+	if ldapUsername == "" || ldapPassword == "" {
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSMissingParameter))
+		return
+	}
+
+	ldapConn, err := globalServerConfig.LDAPServerConfig.Connect()
+	if err != nil {
+		logger.LogIf(ctx, fmt.Errorf("LDAP server connection failure: %v", err))
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
+		return
+	}
+	if ldapConn == nil {
+		logger.LogIf(ctx, fmt.Errorf("LDAP server not configured", err))
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
+		return
+	}
+
+	// Bind with user credentials to validate the password
+	err = ldapConn.Bind(ldapUsername, ldapPassword)
+	if err != nil {
+		logger.LogIf(ctx, fmt.Errorf("LDAP authentication failure: %v", err))
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInvalidParameterValue))
+		return
+	}
+
+	m := map[string]interface{}{
+		// Set expiry time of 1 hour from now.
+		"exp":              UTCNow().Add(1 * time.Hour).Unix(),
+		"externalUsername": ldapUsername,
+	}
+
+	secret := globalServerConfig.GetCredential().SecretKey
+	cred, err := auth.GetNewCredentialsWithMetadata(m, secret)
+	if err != nil {
+		logger.LogIf(ctx, err)
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInternalError))
+		return
+	}
+
+	policyName := ""
+	// Set the newly generated credentials.
+	if err = globalIAMSys.SetTempUser(cred.AccessKey, cred, policyName); err != nil {
+		logger.LogIf(ctx, err)
+		writeSTSErrorResponse(w, stsErrCodes.ToSTSErr(ErrSTSInternalError))
+		return
+	}
+
+	// Notify all other MinIO peers to reload temp users
+	for _, nerr := range globalNotificationSys.LoadUser(cred.AccessKey, true) {
+		if nerr.Err != nil {
+			logger.GetReqInfo(ctx).SetTags("peerAddress", nerr.Host.String())
+			logger.LogIf(ctx, nerr.Err)
+		}
+	}
+
+	ldapIdentityResponse := &AssumeRoleWithLDAPResponse{
+		Result: LDAPIdentityResult{
+			Credentials: cred,
+		},
+	}
+	ldapIdentityResponse.ResponseMetadata.RequestID = w.Header().Get(xhttp.AmzRequestID)
+	encodedSuccessResponse := encodeResponse(ldapIdentityResponse)
+
+	writeSuccessResponseXML(w, encodedSuccessResponse)
 }
