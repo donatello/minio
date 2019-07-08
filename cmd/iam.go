@@ -52,6 +52,10 @@ const (
 
 	// IAM policy file which provides policies for each users.
 	iamPolicyFile = "policy.json"
+
+	// IAM Group policy map file. It is stored in the
+	// iamConfigPrefix directory.
+	iamGroupPolicyFile = "group.json"
 )
 
 // IAMSys - config system.
@@ -60,6 +64,7 @@ type IAMSys struct {
 	iamUsersMap        map[string]auth.Credentials
 	iamPolicyMap       map[string]string
 	iamCannedPolicyMap map[string]iampolicy.Policy
+	iamGroupPolicyMap  map[string]string // map of groupname -> policy name
 }
 
 // LoadPolicy - reloads a specific canned policy from backend disks or etcd.
