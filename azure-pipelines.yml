@@ -1,0 +1,46 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  GOPATH: '$(Agent.BuildDirectory)/gopath' # Go workspace path
+  GOROOT: '$(Agent.BuildDirectory)/go' # Go installation path
+  GOBIN:  '$(GOPATH)/bin' # Go binaries path
+  modulePath: '$(GOPATH)/src/github.com/minio/minio' # Path to the module's code
+
+steps:
+- script: |
+    wget "https://storage.googleapis.com/golang/go1.12.5.linux-amd64.tar.gz" --output-document "$(Agent.BuildDirectory)/go1.12.5.tar.gz"
+    tar -C '$(Agent.BuildDirectory)' -xzf "$(Agent.BuildDirectory)/go1.12.5.tar.gz"
+  displayName: 'Install Go 1.12.5'
+- script: |
+    echo '##vso[task.prependpath]$(GOBIN)'
+    echo '##vso[task.prependpath]$(GOROOT)/bin'
+    shopt -s extglob
+    mkdir -p '$(modulePath)'
+    rmdir '$(modulePath)'
+    ln -s '$(Build.Repository.LocalPath)' '$(modulePath)'
+  displayName: 'Set up PATH and move code to GOPATH'
+- script: |
+    echo '$(Agent.BuildDirectory)'
+    echo $GOPATH $GOROOT $GOBIN '$(modulePath)'
+    which go
+    go version
+    make
+    diff -au <(gofmt -s -d cmd) <(printf "")
+    diff -au <(gofmt -s -d pkg) <(printf "")
+    for d in $(go list ./... | grep -v browser); do CGO_ENABLED=1 go test -v -race --timeout 15m "$d"; done
+    make verifiers
+    make crosscompile
+    make verify
+    make coverage
+    cd browser && yarn && yarn test && cd ..
+  workingDirectory: '$(modulePath)'
+  displayName: 'Run the build'
