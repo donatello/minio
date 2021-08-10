@@ -29,6 +29,12 @@ var (
 			Sensitive:   true,
 		},
 		config.HelpKV{
+			Key:         MCCEnabled,
+			Description: `is multi-cluster configuration enabled?`,
+			Optional:    true,
+			Type:        "bool",
+		},
+		config.HelpKV{
 			Key:         PathPrefix,
 			Description: `namespace prefix to isolate tenants e.g. "customer1/"`,
 			Optional:    true,

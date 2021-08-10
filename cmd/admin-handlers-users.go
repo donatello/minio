@@ -21,10 +21,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"sort"
+	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/minio/madmin-go"
@@ -1224,9 +1226,25 @@ func (a adminAPIHandlers) RemoveCannedPolicy(w http.ResponseWriter, r *http.Requ
 	vars := mux.Vars(r)
 	policyName := vars["name"]
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeErrorResponseJSON(ctx, w, toAdminAPIErr(ctx, err), r.URL)
+			return
+		}
+		defer mccLock.Unlock()
+	}
+
 	if err := globalIAMSys.DeletePolicy(policyName); err != nil {
 		writeErrorResponseJSON(ctx, w, toAdminAPIErr(ctx, err), r.URL)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.DeregisterPolicy(ctx, policyName)
+		// In case we failed, we just log and continue, as the operation
+		// is already done.
+		logger.LogIf(ctx, err)
 	}
 
 	// Notify all other MinIO peers to delete policy
@@ -1276,9 +1294,28 @@ func (a adminAPIHandlers) AddCannedPolicy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	var mccLock sync.Locker
+	if globalMultiCluster != nil {
+		var err error
+		mccLock, err = globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeErrorResponseJSON(ctx, w, toAdminAPIErr(ctx, err), r.URL)
+			return
+		}
+		defer mccLock.Unlock()
+	}
+
 	if err = globalIAMSys.SetPolicy(policyName, *iamPolicy); err != nil {
 		writeErrorResponseJSON(ctx, w, toAdminAPIErr(ctx, err), r.URL)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		fmt.Println("registering new policy!")
+		err := globalMultiCluster.RegisterNewPolicy(ctx, policyName, *iamPolicy)
+		// In case we failed, we just log and continue, as the operation
+		// is already done.
+		logger.LogIf(ctx, err)
 	}
 
 	// Notify all other MinIO peers to reload policy

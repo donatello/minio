@@ -386,7 +386,16 @@ func lookupConfigs(s config.Config, objAPI ObjectLayer) {
 	}
 
 	if etcdCfg.Enabled {
-		if globalEtcdClient == nil {
+		if etcdCfg.MCCEnabled {
+			etcdClient, err := etcd.New(etcdCfg)
+			if err != nil {
+				logger.FatalIf(err, "Unable to initialize etcd config")
+			}
+			globalMultiCluster, err = NewMultiCluster(etcdClient)
+			if err != nil {
+				logger.FatalIf(err, "Unable to initialize multi-cluster config")
+			}
+		} else if globalEtcdClient == nil {
 			globalEtcdClient, err = etcd.New(etcdCfg)
 			if err != nil {
 				if globalIsGateway {

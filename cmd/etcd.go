@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	etcd "go.etcd.io/etcd/client/v3"
 )
@@ -84,4 +85,51 @@ func readKeyEtcd(ctx context.Context, client *etcd.Client, key string) ([]byte, 
 		}
 	}
 	return nil, errConfigNotFound
+}
+
+// readKeyWithRevEtcd - same as readKeyEtcd, but returns the mod_revision of the
+// key if it exists, or the current revision on etcd.
+func readKeyWithRevEtcd(ctx context.Context, client *etcd.Client, key string) ([]byte, int64, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, defaultContextTimeout)
+	defer cancel()
+	resp, err := client.Get(timeoutCtx, key)
+	if err != nil {
+		return nil, 0, etcdErrToErr(err, client.Endpoints())
+	}
+	if resp.Count == 0 {
+		return nil, resp.Header.GetRevision(), errConfigNotFound
+	}
+	for _, ev := range resp.Kvs {
+		if string(ev.Key) == key {
+			return ev.Value, ev.ModRevision, nil
+		}
+	}
+	return nil, 0, errConfigNotFound
+}
+
+type kvPair struct {
+	Key   string
+	Value []byte
+}
+
+// The result keys are stripped of the prefix given here.
+func readKeysWithPrefixEtcd(ctx context.Context, client *etcd.Client, pfx string) ([]kvPair, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, defaultContextTimeout)
+	defer cancel()
+	resp, err := client.Get(timeoutCtx, pfx, etcd.WithPrefix())
+	if err != nil {
+		return nil, etcdErrToErr(err, client.Endpoints())
+	}
+	rs := make([]kvPair, resp.Count)
+	for i, ev := range resp.Kvs {
+		rs[i].Key, rs[i].Value = strings.TrimPrefix(string(ev.Key), pfx), ev.Value
+	}
+	return rs, nil
+}
+
+func doEtcd(ctx context.Context, client *etcd.Client, op etcd.Op) (etcd.OpResponse, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, defaultContextTimeout)
+	defer cancel()
+	resp, err := client.Do(timeoutCtx, op)
+	return resp, etcdErrToErr(err, client.Endpoints())
 }

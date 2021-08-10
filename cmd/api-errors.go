@@ -263,6 +263,8 @@ const (
 	ErrAdminConfigBadJSON
 	ErrAdminConfigDuplicateKeys
 	ErrAdminCredentialsMismatch
+	ErrAdminMultiClusterNotConfigured
+	ErrAdminMultiClusterBucketNameAlreadyUsed
 	ErrInsecureClientRequest
 	ErrObjectTampered
 	// Bucket Quota error codes
@@ -1226,6 +1228,16 @@ var errorCodes = errorCodeMap{
 		Code:           "XMinioAdminCredentialsMismatch",
 		Description:    "Credentials in config mismatch with server environment variables",
 		HTTPStatusCode: http.StatusServiceUnavailable,
+	},
+	ErrAdminMultiClusterNotConfigured: {
+		Code:           "XMinioAdminMultiClusterNotConfigured",
+		Description:    "Multi-cluster config is not enabled",
+		HTTPStatusCode: http.StatusBadRequest,
+	},
+	ErrAdminMultiClusterBucketNameAlreadyUsed: {
+		Code:           "XMinioAdminMultiClusterBucketNameAlreadyUsed",
+		Description:    "This bucket already exists in the multi-cluster",
+		HTTPStatusCode: http.StatusBadRequest,
 	},
 	ErrAdminBucketQuotaExceeded: {
 		Code:           "XMinioAdminBucketQuotaExceeded",

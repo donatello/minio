@@ -451,14 +451,16 @@ func (sys *IAMSys) InitStore(objAPI ObjectLayer) {
 	sys.Lock()
 	defer sys.Unlock()
 
-	if globalEtcdClient == nil {
+	// Etcd IAM store is used only if etcd is configured and multi-cluster
+	// is disabled.
+	if globalEtcdClient != nil && globalMultiCluster == nil {
+		sys.store = newIAMEtcdStore()
+	} else {
 		if globalIsGateway {
 			sys.store = &iamDummyStore{}
 		} else {
 			sys.store = newIAMObjectStore(objAPI)
 		}
-	} else {
-		sys.store = newIAMEtcdStore()
 	}
 
 	if globalLDAPConfig.Enabled {
@@ -843,6 +845,7 @@ func (sys *IAMSys) DeleteUser(accessKey string) error {
 
 	// It is ok to ignore deletion error on the mapped policy
 	sys.store.deleteMappedPolicy(context.Background(), accessKey, regUser, false)
+	globalMultiCluster.DeregisterPolicyMapping(context.Background(), accessKey, regUser, false)
 	err := sys.store.deleteUserIdentity(context.Background(), accessKey, regUser)
 	if err == errNoSuchUser {
 		// ignore if user is already deleted.
@@ -901,6 +904,11 @@ func (sys *IAMSys) SetTempUser(accessKey string, cred auth.Credentials, policyNa
 
 		if err := sys.store.saveMappedPolicy(context.Background(), accessKey, stsUser, false, mp, options{ttl: ttl}); err != nil {
 			return err
+		}
+
+		if globalMultiCluster != nil {
+			err := globalMultiCluster.RegisterPolicyMapping(context.Background(), accessKey, stsUser, false, mp, ttl)
+			logger.LogIf(context.Background(), err)
 		}
 
 		sys.iamUserPolicyMap[accessKey] = mp
@@ -1281,10 +1289,32 @@ func (sys *IAMSys) NewServiceAccount(ctx context.Context, parentUser string, gro
 	cred.Groups = groups
 	cred.Status = string(auth.AccountOn)
 
-	u := newUserIdentity(cred)
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			return auth.Credentials{}, err
+		}
+		defer mccLock.Unlock()
 
+		// ensure this service account is not already in mcc.
+		exists, err := globalMultiCluster.DoesAccessKeyExist(ctx, stsUser, cred.AccessKey)
+		if err != nil {
+			return auth.Credentials{}, err
+		}
+		if exists {
+			return auth.Credentials{}, errors.New("This access key already exists in the multi-cluster")
+		}
+	}
+
+	u := newUserIdentity(cred)
 	if err := sys.store.saveUserIdentity(context.Background(), u.Credentials.AccessKey, svcUser, u); err != nil {
 		return auth.Credentials{}, err
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterUserIdentity(ctx, svcUser, u)
+		// If we failed, we drop a log and just continue.
+		logger.LogIf(ctx, err)
 	}
 
 	sys.iamUsersMap[u.Credentials.AccessKey] = u.Credentials
@@ -1352,9 +1382,23 @@ func (sys *IAMSys) UpdateServiceAccount(ctx context.Context, accessKey string, o
 		}
 	}
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			return err
+		}
+		defer mccLock.Unlock()
+	}
+
 	u := newUserIdentity(cr)
 	if err := sys.store.saveUserIdentity(context.Background(), u.Credentials.AccessKey, svcUser, u); err != nil {
 		return err
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterUserIdentity(ctx, svcUser, u)
+		// If we failed, we drop a log and just continue.
+		logger.LogIf(ctx, err)
 	}
 
 	sys.iamUsersMap[u.Credentials.AccessKey] = u.Credentials
@@ -1439,10 +1483,24 @@ func (sys *IAMSys) DeleteServiceAccount(ctx context.Context, accessKey string) e
 		return nil
 	}
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			return err
+		}
+		defer mccLock.Unlock()
+	}
+
 	// It is ok to ignore deletion error on the mapped policy
 	err := sys.store.deleteUserIdentity(context.Background(), accessKey, svcUser)
 	if err != nil && err != errNoSuchUser {
 		return err
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.DeregisterUserIdentity(ctx, svcUser, accessKey)
+		// If we failed, we drop a log and just continue.
+		logger.LogIf(ctx, err)
 	}
 
 	delete(sys.iamUsersMap, accessKey)
@@ -1917,6 +1975,7 @@ func (sys *IAMSys) RemoveUsersFromGroup(group string, members []string) error {
 		if err := sys.store.deleteMappedPolicy(context.Background(), group, regUser, true); err != nil && err != errNoSuchPolicy {
 			return err
 		}
+		globalMultiCluster.DeregisterPolicyMapping(context.Background(), group, regUser, true)
 		if err := sys.store.deleteGroupInfo(context.Background(), group); err != nil && err != errNoSuchGroup {
 			return err
 		}
@@ -2089,11 +2148,14 @@ func (sys *IAMSys) policyDBSet(name, policyName string, userType IAMUserType, is
 			// as a ghost user due to lack of delete, this change occurred
 			// introduced in PR #11840
 			sys.store.deleteMappedPolicy(context.Background(), name, regUser, false)
+			globalMultiCluster.DeregisterPolicyMapping(context.Background(), name, regUser, false)
+
 		}
 		err := sys.store.deleteMappedPolicy(context.Background(), name, userType, isGroup)
 		if err != nil && err != errNoSuchPolicy {
 			return err
 		}
+		globalMultiCluster.DeregisterPolicyMapping(context.Background(), name, userType, isGroup)
 		if !isGroup {
 			delete(sys.iamUserPolicyMap, name)
 		} else {
@@ -2114,6 +2176,14 @@ func (sys *IAMSys) policyDBSet(name, policyName string, userType IAMUserType, is
 	if err := sys.store.saveMappedPolicy(context.Background(), name, userType, isGroup, mp); err != nil {
 		return err
 	}
+
+	if globalMultiCluster != nil {
+		ctx := context.Background()
+		err := globalMultiCluster.RegisterPolicyMapping(ctx, name, userType, isGroup, mp, 0)
+		// On failure, we log and continue
+		logger.LogIf(ctx, err)
+	}
+
 	if !isGroup {
 		sys.iamUserPolicyMap[name] = mp
 	} else {

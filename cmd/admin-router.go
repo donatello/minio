@@ -168,6 +168,11 @@ func registerAdminRouter(router *mux.Router, enableConfigOps bool) {
 		// Set Group Status
 		adminRouter.Methods(http.MethodPut).Path(adminVersion+"/set-group-status").HandlerFunc(gz(httpTraceHdrs(adminAPI.SetGroupStatus))).Queries("group", "{group:.*}").Queries("status", "{status:.*}")
 
+		// Multi-Cluster APIs
+		adminRouter.Methods(http.MethodPut).Path(adminVersion + "/cluster/link").HandlerFunc(gz(httpTraceHdrs(adminAPI.ClusterLink)))
+		adminRouter.Methods(http.MethodPut).Path(adminVersion + "/cluster/unlink").HandlerFunc(gz(httpTraceHdrs(adminAPI.ClusterUnlink)))
+		adminRouter.Methods(http.MethodGet).Path(adminVersion + "/cluster/info").HandlerFunc(gz(httpTraceHdrs(adminAPI.ClusterInfo)))
+
 		if globalIsDistErasure || globalIsErasure {
 			// GetBucketQuotaConfig
 			adminRouter.Methods(http.MethodGet).Path(adminVersion+"/get-bucket-quota").HandlerFunc(

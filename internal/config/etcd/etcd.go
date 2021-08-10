@@ -40,12 +40,14 @@ const (
 // etcd environment values
 const (
 	Endpoints     = "endpoints"
+	MCCEnabled    = "mcc_enabled"
 	PathPrefix    = "path_prefix"
 	CoreDNSPath   = "coredns_path"
 	ClientCert    = "client_cert"
 	ClientCertKey = "client_cert_key"
 
 	EnvEtcdEndpoints     = "MINIO_ETCD_ENDPOINTS"
+	EnvEtcdMCCEnabled    = "MINIO_ETCD_MCC_ENABLED"
 	EnvEtcdPathPrefix    = "MINIO_ETCD_PATH_PREFIX"
 	EnvEtcdCoreDNSPath   = "MINIO_ETCD_COREDNS_PATH"
 	EnvEtcdClientCert    = "MINIO_ETCD_CLIENT_CERT"
@@ -58,6 +60,10 @@ var (
 		config.KV{
 			Key:   Endpoints,
 			Value: "",
+		},
+		config.KV{
+			Key:   MCCEnabled,
+			Value: "false",
 		},
 		config.KV{
 			Key:   PathPrefix,
@@ -81,6 +87,7 @@ var (
 // Config - server etcd config.
 type Config struct {
 	Enabled     bool   `json:"enabled"`
+	MCCEnabled  bool   `json:"mccEnabled"`
 	PathPrefix  string `json:"pathPrefix"`
 	CoreDNSPath string `json:"coreDNSPath"`
 	clientv3.Config
@@ -141,6 +148,13 @@ func LookupConfig(kvs config.KVS, rootCAs *x509.CertPool) (Config, error) {
 	etcdEndpoints, etcdSecure, err := parseEndpoints(endpoints)
 	if err != nil {
 		return cfg, err
+	}
+
+	if v := env.Get(EnvEtcdMCCEnabled, kvs.Get(MCCEnabled)); v != "" {
+		cfg.MCCEnabled, err = config.ParseBool(v)
+		if err != nil {
+			return cfg, err
+		}
 	}
 
 	cfg.Enabled = true

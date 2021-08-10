@@ -558,6 +558,8 @@ func serverMain(ctx *cli.Context) {
 		logger.LogIf(GlobalContext, err)
 	}
 
+	globalMultiCluster.Init(GlobalContext)
+
 	// Initialize users credentials and policies in background right after config has initialized.
 	go globalIAMSys.Init(GlobalContext, newObject)
 

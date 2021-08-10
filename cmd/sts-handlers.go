@@ -268,10 +268,28 @@ func (sts *stsAPIHandlers) AssumeRole(w http.ResponseWriter, r *http.Request) {
 	// in obtaining service accounts by this cred.
 	cred.ParentUser = user.AccessKey
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
+			return
+		}
+		defer mccLock.Unlock()
+
+		// We skip the already exists check, because the credential is
+		// randomly generated.
+	}
+
 	// Set the newly generated credentials.
 	if err = globalIAMSys.SetTempUser(cred.AccessKey, cred, policyName); err != nil {
 		writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterUserIdentity(ctx, stsUser, newUserIdentity(cred))
+		// If we fail, drop a log and continue
+		logger.LogIf(ctx, err)
 	}
 
 	// Notify all other MinIO peers to reload temp users
@@ -470,10 +488,28 @@ func (sts *stsAPIHandlers) AssumeRoleWithSSO(w http.ResponseWriter, r *http.Requ
 	// based logins.
 	cred.ParentUser = "openid:" + subFromToken + ":" + issFromToken
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
+			return
+		}
+		defer mccLock.Unlock()
+
+		// We skip the already exists check, because the credential is
+		// randomly generated.
+	}
+
 	// Set the newly generated credentials.
 	if err = globalIAMSys.SetTempUser(cred.AccessKey, cred, policyName); err != nil {
 		writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterUserIdentity(ctx, stsUser, newUserIdentity(cred))
+		// If we fail, drop a log and continue
+		logger.LogIf(ctx, err)
 	}
 
 	// Notify all other MinIO peers to reload temp users
@@ -632,12 +668,30 @@ func (sts *stsAPIHandlers) AssumeRoleWithLDAPIdentity(w http.ResponseWriter, r *
 	// of large number of groups
 	cred.Groups = groupDistNames
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
+			return
+		}
+		defer mccLock.Unlock()
+
+		// We skip the already exists check, because the credential is
+		// randomly generated.
+	}
+
 	// Set the newly generated credentials, policyName is empty on purpose
 	// LDAP policies are applied automatically using their ldapUser, ldapGroups
 	// mapping.
 	if err = globalIAMSys.SetTempUser(cred.AccessKey, cred, ""); err != nil {
 		writeSTSErrorResponse(ctx, w, true, ErrSTSInternalError, err)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterUserIdentity(ctx, stsUser, newUserIdentity(cred))
+		// If we fail, drop a log and continue
+		logger.LogIf(ctx, err)
 	}
 
 	// Notify all other MinIO peers to reload temp users
