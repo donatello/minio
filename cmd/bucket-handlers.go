@@ -757,7 +757,6 @@ func (api objectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Req
 			}
 			writeErrorResponse(ctx, w, toAPIError(ctx, err), r.URL)
 			return
-
 		}
 		apiErr := ErrBucketAlreadyExists
 		if !globalDomainIPs.Intersection(set.CreateStringSet(getHostsSlice(sr)...)).IsEmpty() {
@@ -771,11 +770,37 @@ func (api objectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeErrorResponse(ctx, w, toAPIError(ctx, err), r.URL)
+			return
+		}
+		defer mccLock.Unlock()
+
+		// Check if the bucket name is already used in the cluster.
+		if exists, err := globalMultiCluster.DoesBucketExist(ctx, bucket); err != nil {
+			writeErrorResponse(ctx, w, toAPIError(ctx, err), r.URL)
+			return
+		} else if exists {
+			writeErrorResponse(ctx, w, errorCodes.ToAPIErr(ErrAdminMultiClusterBucketNameAlreadyUsed), r.URL)
+			return
+		}
+
+	}
+
 	// Proceed to creating a bucket.
 	err := objectAPI.MakeBucketWithLocation(ctx, bucket, opts)
 	if err != nil {
 		writeErrorResponse(ctx, w, toAPIError(ctx, err), r.URL)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.RegisterNewBucket(ctx, bucket, false)
+		// If we failed after creating the bucket, we drop a log and
+		// just continue.
+		logger.LogIf(ctx, err)
 	}
 
 	// Load updated bucket metadata into memory.
@@ -1237,6 +1262,15 @@ func (api objectAPIHandlers) DeleteBucketHandler(w http.ResponseWriter, r *http.
 		}
 	}
 
+	if globalMultiCluster != nil {
+		mccLock, err := globalMultiCluster.NewOpLock(ctx)
+		if err != nil {
+			writeErrorResponse(ctx, w, toAPIError(ctx, err), r.URL)
+			return
+		}
+		defer mccLock.Unlock()
+	}
+
 	deleteBucket := objectAPI.DeleteBucket
 
 	// Attempt to delete bucket.
@@ -1254,6 +1288,13 @@ func (api objectAPIHandlers) DeleteBucketHandler(w http.ResponseWriter, r *http.
 		}
 		writeErrorResponse(ctx, w, apiErr, r.URL)
 		return
+	}
+
+	if globalMultiCluster != nil {
+		err := globalMultiCluster.DeregisterBucket(ctx, bucket)
+		// If we failed after creating the bucket, we drop a log and
+		// just continue.
+		logger.LogIf(ctx, err)
 	}
 
 	globalNotificationSys.DeleteBucketMetadata(ctx, bucket)
