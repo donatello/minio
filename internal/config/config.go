@@ -70,6 +70,7 @@ const (
 	CacheSubSys          = "cache"
 	RegionSubSys         = "region"
 	EtcdSubSys           = "etcd"
+	MultiClusterSubSys   = "multi_cluster"
 	StorageClassSubSys   = "storage_class"
 	APISubSys            = "api"
 	CompressionSubSys    = "compression"
@@ -104,6 +105,7 @@ var SubSystems = set.CreateStringSet(
 	CredentialsSubSys,
 	RegionSubSys,
 	EtcdSubSys,
+	MultiClusterSubSys,
 	CacheSubSys,
 	APISubSys,
 	StorageClassSubSys,
@@ -142,6 +144,7 @@ var SubSystemsSingleTargets = set.CreateStringSet([]string{
 	CredentialsSubSys,
 	RegionSubSys,
 	EtcdSubSys,
+	MultiClusterSubSys,
 	CacheSubSys,
 	APISubSys,
 	StorageClassSubSys,

@@ -35,6 +35,7 @@ import (
 	xldap "github.com/minio/minio/internal/config/identity/ldap"
 	"github.com/minio/minio/internal/config/identity/openid"
 	xtls "github.com/minio/minio/internal/config/identity/tls"
+	"github.com/minio/minio/internal/config/multicluster"
 	"github.com/minio/minio/internal/config/notify"
 	"github.com/minio/minio/internal/config/policy/opa"
 	"github.com/minio/minio/internal/config/scanner"
@@ -51,6 +52,7 @@ import (
 func initHelp() {
 	var kvs = map[string]config.KVS{
 		config.EtcdSubSys:           etcd.DefaultKVS,
+		config.MultiClusterSubSys:   multicluster.DefaultKVS,
 		config.CacheSubSys:          cache.DefaultKVS,
 		config.CompressionSubSys:    compress.DefaultKVS,
 		config.IdentityLDAPSubSys:   xldap.DefaultKVS,
@@ -91,6 +93,10 @@ func initHelp() {
 		config.HelpKV{
 			Key:         config.EtcdSubSys,
 			Description: "federate multiple clusters for IAM and Bucket DNS",
+		},
+		config.HelpKV{
+			Key:         config.MultiClusterSubSys,
+			Description: "join multiple clusters for global IAM and global namespace",
 		},
 		config.HelpKV{
 			Key:         config.IdentityOpenIDSubSys,
@@ -202,6 +208,7 @@ func initHelp() {
 		config.APISubSys:            api.Help,
 		config.StorageClassSubSys:   storageclass.Help,
 		config.EtcdSubSys:           etcd.Help,
+		config.MultiClusterSubSys:   multicluster.Help,
 		config.CacheSubSys:          cache.Help,
 		config.CompressionSubSys:    compress.Help,
 		config.HealSubSys:           heal.Help,
@@ -305,6 +312,21 @@ func validateConfig(s config.Config) error {
 			etcdClnt.Close()
 		}
 	}
+
+	{
+		multiClusterCfg, err := multicluster.LookupConfig(s[config.MultiClusterSubSys][config.Default], globalRootCAs)
+		if err != nil {
+			return err
+		}
+		if multiClusterCfg.Enabled {
+			mccClient, err := multicluster.New(multiClusterCfg)
+			if err != nil {
+				return err
+			}
+			mccClient.Close()
+		}
+	}
+
 	if _, err := openid.LookupConfig(s[config.IdentityOpenIDSubSys][config.Default],
 		NewGatewayHTTPTransport(), xhttp.DrainBody); err != nil {
 		return err
@@ -386,16 +408,7 @@ func lookupConfigs(s config.Config, objAPI ObjectLayer) {
 	}
 
 	if etcdCfg.Enabled {
-		if etcdCfg.MCCEnabled {
-			etcdClient, err := etcd.New(etcdCfg)
-			if err != nil {
-				logger.FatalIf(err, "Unable to initialize etcd config")
-			}
-			globalMultiCluster, err = NewMultiCluster(etcdClient)
-			if err != nil {
-				logger.FatalIf(err, "Unable to initialize multi-cluster config")
-			}
-		} else if globalEtcdClient == nil {
+		if globalEtcdClient == nil {
 			globalEtcdClient, err = etcd.New(etcdCfg)
 			if err != nil {
 				if globalIsGateway {
@@ -436,6 +449,21 @@ func lookupConfigs(s config.Config, objAPI ObjectLayer) {
 	// we assume that users are interested in global bucket support
 	// but not federation.
 	globalBucketFederation = etcdCfg.PathPrefix == "" && etcdCfg.Enabled
+
+	multiClusterCfg, err := multicluster.LookupConfig(s[config.MultiClusterSubSys][config.Default], globalRootCAs)
+	if err != nil {
+		logger.FatalIf(err, "Unable to initialize multi-cluster config")
+	}
+	if multiClusterCfg.Enabled {
+		mccClient, err := multicluster.New(multiClusterCfg)
+		if err != nil {
+			logger.FatalIf(err, "Unable to initialize mcc config")
+		}
+		globalMultiCluster, err = NewMultiCluster(mccClient)
+		if err != nil {
+			logger.FatalIf(err, "Unable to initialize multi-cluster config")
+		}
+	}
 
 	globalServerRegion, err = config.LookupRegion(s[config.RegionSubSys][config.Default])
 	if err != nil {

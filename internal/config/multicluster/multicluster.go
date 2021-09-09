@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-package etcd
+package multicluster
 
 import (
 	"crypto/tls"
@@ -26,8 +26,7 @@ import (
 	"github.com/minio/minio/internal/config"
 	"github.com/minio/pkg/env"
 	xnet "github.com/minio/pkg/net"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/client/v3/namespace"
+	etcd "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -37,108 +36,93 @@ const (
 	defaultDialKeepAlive = 30 * time.Second
 )
 
-// etcd environment values
+// configuration parameter names
 const (
-	Endpoints     = "endpoints"
-	PathPrefix    = "path_prefix"
-	CoreDNSPath   = "coredns_path"
-	ClientCert    = "client_cert"
-	ClientCertKey = "client_cert_key"
+	ControllerEndpoints     = "controller_endpoints"
+	ControllerClientCert    = "controller_client_cert"
+	ControllerClientCertKey = "controller_client_cert_key"
 
-	EnvEtcdEndpoints     = "MINIO_ETCD_ENDPOINTS"
-	EnvEtcdPathPrefix    = "MINIO_ETCD_PATH_PREFIX"
-	EnvEtcdCoreDNSPath   = "MINIO_ETCD_COREDNS_PATH"
-	EnvEtcdClientCert    = "MINIO_ETCD_CLIENT_CERT"
-	EnvEtcdClientCertKey = "MINIO_ETCD_CLIENT_CERT_KEY"
+	EnvMultiClusterControllerEndpoints     = "MINIO_MULTI_CLUSTER_CONTROLLER_ENDPOINTS"
+	EnvMultiClusterControllerClientCert    = "MINIO_MULTI_CLUSTER_CONTROLLER_CLIENT_CERT"
+	EnvMultiClusterControllerClientCertKey = "MINIO_MULTI_CLUSTER_CONTROLLER_CLIENT_CERT_KEY"
 )
 
-// DefaultKVS - default KV settings for etcd.
+// DefaultKVS - default KV for multi-cluster
 var (
 	DefaultKVS = config.KVS{
 		config.KV{
-			Key:   Endpoints,
+			Key:   ControllerEndpoints,
 			Value: "",
 		},
 		config.KV{
-			Key:   PathPrefix,
+			Key:   ControllerClientCert,
 			Value: "",
 		},
 		config.KV{
-			Key:   CoreDNSPath,
-			Value: "/skydns",
-		},
-		config.KV{
-			Key:   ClientCert,
-			Value: "",
-		},
-		config.KV{
-			Key:   ClientCertKey,
+			Key:   ControllerClientCertKey,
 			Value: "",
 		},
 	}
 )
 
-// Config - server etcd config.
+// Config - multicluster config
 type Config struct {
-	Enabled     bool   `json:"enabled"`
-	PathPrefix  string `json:"pathPrefix"`
-	CoreDNSPath string `json:"coreDNSPath"`
-	clientv3.Config
+	Enabled bool `json:"enabled"`
+
+	etcd.Config
 }
 
-// New - initialize new etcd client.
-func New(cfg Config) (*clientv3.Client, error) {
+func New(cfg Config) (*etcd.Client, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	cli, err := clientv3.New(cfg.Config)
+
+	cli, err := etcd.New(cfg.Config)
 	if err != nil {
 		return nil, err
 	}
-	cli.KV = namespace.NewKV(cli.KV, cfg.PathPrefix)
-	cli.Watcher = namespace.NewWatcher(cli.Watcher, cfg.PathPrefix)
-	cli.Lease = namespace.NewLease(cli.Lease, cfg.PathPrefix)
+
 	return cli, nil
 }
 
 func parseEndpoints(endpoints string) ([]string, bool, error) {
-	etcdEndpoints := strings.Split(endpoints, config.ValueSeparator)
+	controllerEndpoints := strings.Split(endpoints, config.ValueSeparator)
 
-	var etcdSecure bool
-	for _, endpoint := range etcdEndpoints {
+	var isSecure bool
+	for _, endpoint := range controllerEndpoints {
 		u, err := xnet.ParseHTTPURL(endpoint)
 		if err != nil {
 			return nil, false, err
 		}
-		if etcdSecure && u.Scheme == "http" {
+		if isSecure && u.Scheme == "http" {
 			return nil, false, config.Errorf("all endpoints should be https or http: %s", endpoint)
 		}
 		// If one of the endpoint is https, we will use https directly.
-		etcdSecure = etcdSecure || u.Scheme == "https"
+		isSecure = isSecure || u.Scheme == "https"
 	}
 
-	return etcdEndpoints, etcdSecure, nil
+	return controllerEndpoints, isSecure, nil
 }
 
 // Enabled returns if etcd is enabled.
 func Enabled(kvs config.KVS) bool {
-	endpoints := kvs.Get(Endpoints)
+	endpoints := kvs.Get(ControllerEndpoints)
 	return endpoints != ""
 }
 
 // LookupConfig - Initialize new etcd config.
 func LookupConfig(kvs config.KVS, rootCAs *x509.CertPool) (Config, error) {
 	cfg := Config{}
-	if err := config.CheckValidKeys(config.EtcdSubSys, kvs, DefaultKVS); err != nil {
+	if err := config.CheckValidKeys(config.MultiClusterSubSys, kvs, DefaultKVS); err != nil {
 		return cfg, err
 	}
 
-	endpoints := env.Get(EnvEtcdEndpoints, kvs.Get(Endpoints))
+	endpoints := env.Get(EnvMultiClusterControllerEndpoints, kvs.Get(ControllerEndpoints))
 	if endpoints == "" {
 		return cfg, nil
 	}
 
-	etcdEndpoints, etcdSecure, err := parseEndpoints(endpoints)
+	controllerEndpoints, isSecure, err := parseEndpoints(endpoints)
 	if err != nil {
 		return cfg, err
 	}
@@ -153,18 +137,15 @@ func LookupConfig(kvs config.KVS, rootCAs *x509.CertPool) (Config, error) {
 		Level:    zap.NewAtomicLevelAt(zap.FatalLevel),
 		Encoding: "console",
 	}
-	cfg.Endpoints = etcdEndpoints
-	cfg.CoreDNSPath = env.Get(EnvEtcdCoreDNSPath, kvs.Get(CoreDNSPath))
-	// Default path prefix for all keys on etcd, other than CoreDNSPath.
-	cfg.PathPrefix = env.Get(EnvEtcdPathPrefix, kvs.Get(PathPrefix))
-	if etcdSecure {
+	cfg.Endpoints = controllerEndpoints
+	if isSecure {
 		cfg.TLS = &tls.Config{
 			RootCAs: rootCAs,
 		}
 		// This is only to support client side certificate authentication
 		// https://coreos.com/etcd/docs/latest/op-guide/security.html
-		etcdClientCertFile := env.Get(EnvEtcdClientCert, kvs.Get(ClientCert))
-		etcdClientCertKey := env.Get(EnvEtcdClientCertKey, kvs.Get(ClientCertKey))
+		etcdClientCertFile := env.Get(EnvMultiClusterControllerClientCert, kvs.Get(ControllerClientCert))
+		etcdClientCertKey := env.Get(EnvMultiClusterControllerClientCertKey, kvs.Get(ControllerClientCertKey))
 		if etcdClientCertFile != "" && etcdClientCertKey != "" {
 			cfg.TLS.GetClientCertificate = func(unused *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 				cert, err := tls.LoadX509KeyPair(etcdClientCertFile, etcdClientCertKey)
