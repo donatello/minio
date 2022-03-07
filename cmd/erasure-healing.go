@@ -57,6 +57,12 @@ func (er erasureObjects) HealBucket(ctx context.Context, bucket string, opts mad
 func healBucket(ctx context.Context, storageDisks []StorageAPI, storageEndpoints []string, bucket string, writeQuorum int,
 	opts madmin.HealOpts) (res madmin.HealResultItem, err error) {
 
+	defer func() {
+		if errors.Is(err, errFileCorrupt) || errors.Is(err, errFaultyDisk) {
+			logger.LogIf(ctx, fmt.Errorf("[DEBUG] %s: %w", bucket, err))
+		}
+	}()
+
 	// Initialize sync waitgroup.
 	g := errgroup.WithNErrs(len(storageDisks))
 
@@ -237,6 +243,12 @@ func (er erasureObjects) healObject(ctx context.Context, bucket string, object s
 	if !opts.DryRun {
 		defer NSUpdated(bucket, object)
 	}
+
+	defer func() {
+		if errors.Is(err, errFileCorrupt) || errors.Is(err, errFaultyDisk) {
+			logger.LogIf(ctx, fmt.Errorf("[DEBUG] %s/%s: %w", bucket, object, err))
+		}
+	}()
 
 	dryRun := opts.DryRun
 	scanMode := opts.ScanMode
