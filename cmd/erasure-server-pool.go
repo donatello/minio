@@ -230,7 +230,7 @@ func (z *erasureServerPools) getAvailablePoolIdx(ctx context.Context, bucket, ob
 // If there is not enough space the pool will return 0 bytes available.
 // Negative sizes are seen as 0 bytes.
 func (z *erasureServerPools) getServerPoolsAvailableSpace(ctx context.Context, bucket, object string, size int64) serverPoolsAvailableSpace {
-	var serverPools = make(serverPoolsAvailableSpace, len(z.serverPools))
+	serverPools := make(serverPoolsAvailableSpace, len(z.serverPools))
 
 	storageInfos := make([][]*DiskInfo, len(z.serverPools))
 	g := errgroup.WithNErrs(len(z.serverPools))
@@ -613,7 +613,6 @@ func (z *erasureServerPools) MakeBucketWithLocation(ctx context.Context, bucket 
 
 	// Success.
 	return nil
-
 }
 
 func (z *erasureServerPools) GetObjectNInfo(ctx context.Context, bucket, object string, rs *HTTPRangeSpec, h http.Header, lockType LockType, opts ObjectOptions) (gr *GetObjectReader, err error) {
@@ -628,7 +627,7 @@ func (z *erasureServerPools) GetObjectNInfo(ctx context.Context, bucket, object 
 	}
 
 	var unlockOnDefer bool
-	var nsUnlocker = func() {}
+	nsUnlocker := func() {}
 	defer func() {
 		if unlockOnDefer {
 			nsUnlocker()
@@ -1108,7 +1107,7 @@ func (z *erasureServerPools) ListMultipartUploads(ctx context.Context, bucket, p
 		return z.serverPools[0].ListMultipartUploads(ctx, bucket, prefix, keyMarker, uploadIDMarker, delimiter, maxUploads)
 	}
 
-	var poolResult = ListMultipartsInfo{}
+	poolResult := ListMultipartsInfo{}
 	poolResult.MaxUploads = maxUploads
 	poolResult.KeyMarker = keyMarker
 	poolResult.Prefix = prefix
@@ -1233,7 +1232,6 @@ func (z *erasureServerPools) GetMultipartInfo(ctx context.Context, bucket, objec
 		Object:   object,
 		UploadID: uploadID,
 	}
-
 }
 
 // ListObjectParts - lists all uploaded parts to an object in hashedSet.
@@ -1486,7 +1484,7 @@ func (z *erasureServerPools) HealFormat(ctx context.Context, dryRun bool) (madmi
 	ctx = lkctx.Context()
 	defer formatLock.Unlock(lkctx.Cancel)
 
-	var r = madmin.HealResultItem{
+	r := madmin.HealResultItem{
 		Type:   madmin.HealItemMetadata,
 		Detail: "disk-format",
 	}
@@ -1518,7 +1516,7 @@ func (z *erasureServerPools) HealFormat(ctx context.Context, dryRun bool) (madmi
 }
 
 func (z *erasureServerPools) HealBucket(ctx context.Context, bucket string, opts madmin.HealOpts) (madmin.HealResultItem, error) {
-	var r = madmin.HealResultItem{
+	r := madmin.HealResultItem{
 		Type:   madmin.HealItemBucket,
 		Bucket: bucket,
 	}
@@ -1655,15 +1653,14 @@ func (z *erasureServerPools) HealObjects(ctx context.Context, bucket, prefix str
 						}
 						fivs, err := entry.fileInfoVersions(bucket)
 						if err != nil {
-							errCh <- err
-							cancel()
+							logger.LogIf(ctx, fmt.Errorf("[DEBUG] Skipping healing entry %s/%s (with entry: %#v) due to error: %v", bucket, entry.name, entry, err))
 							return
 						}
 						waitForLowHTTPReq(globalHealConfig.IOCount, globalHealConfig.Sleep)
 						for _, version := range fivs.Versions {
 							if err := healObject(bucket, version.Name, version.VersionID); err != nil {
-								errCh <- err
-								cancel()
+								logger.LogIf(ctx, fmt.Errorf("[DEBUG] Skipping healing object %s/%s (with entry: %#v) (with version info: %#v) due to error: %v",
+									bucket, entry.name, entry, version, err))
 								return
 							}
 						}
