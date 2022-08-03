@@ -945,7 +945,7 @@ func (c Config) SetKVS(s string, defaultKVS map[string]KVS) (dynamic bool, err e
 // CheckValidKeys - checks if the config parameters for the given subsystem and
 // target are valid. It checks both the configuration store as well as
 // environment variables.
-func (c Config) CheckValidKeys(subSys string, deprecatedKeys []string) error {
+func (c Config) CheckValidKeys(subSys string, deprecatedKeys []string, extraSupportedEnvVars set.StringSet) error {
 	defKVS, ok := DefaultKVS[subSys]
 	if !ok {
 		return fmt.Errorf("Subsystem %s does not exist", subSys)
@@ -971,12 +971,10 @@ func (c Config) CheckValidKeys(subSys string, deprecatedKeys []string) error {
 		candidates.Remove(paramEnvName)
 	}
 
-	isSingleTarget := SubSystemsSingleTargets.Contains(subSys)
-	if isSingleTarget && len(candidates) > 0 {
-		return fmt.Errorf("The following environment variables are unknown: %s",
-			strings.Join(candidates.ToSlice(), ", "))
-	}
+	// Remove all supported extra env variables.
+	candidates = candidates.Difference(extraSupportedEnvVars)
 
+	isSingleTarget := SubSystemsSingleTargets.Contains(subSys)
 	if !isSingleTarget {
 		// Validate other env vars for all targets.
 		envVars := candidates.ToSlice()
@@ -990,12 +988,12 @@ func (c Config) CheckValidKeys(subSys string, deprecatedKeys []string) error {
 				}
 			}
 		}
+	}
 
-		// Whatever remains are invalid env vars - return an error.
-		if len(candidates) > 0 {
-			return fmt.Errorf("The following environment variables are unknown: %s",
-				strings.Join(candidates.ToSlice(), ", "))
-		}
+	// Whatever remains are invalid env vars - return an error.
+	if len(candidates) > 0 {
+		return fmt.Errorf("The following environment variables are unknown: %s",
+			strings.Join(candidates.ToSlice(), ", "))
 	}
 
 	validKeysSet := set.CreateStringSet(validKeys...)
@@ -1062,7 +1060,7 @@ func getEnvVarName(subSys, target, param string) string {
 	return fmt.Sprintf("%s%s%s%s%s%s", EnvPrefix, strings.ToUpper(subSys), Default, strings.ToUpper(param), Default, target)
 }
 
-var resolvableSubsystems = set.CreateStringSet(IdentityOpenIDSubSys)
+var resolvableSubsystems = set.CreateStringSet(IdentityOpenIDSubSys, CacheSubSys)
 
 // ValueSource represents the source of a config parameter value.
 type ValueSource uint8

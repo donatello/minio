@@ -209,7 +209,7 @@ func LookupConfig(s config.Config, transport http.RoundTripper, closeRespFn func
 		}
 	}
 
-	if err := s.CheckValidKeys(config.IdentityOpenIDSubSys, deprecatedKeys); err != nil {
+	if err := s.CheckValidKeys(config.IdentityOpenIDSubSys, deprecatedKeys, set.NewStringSet()); err != nil {
 		return c, err
 	}
 

@@ -303,7 +303,7 @@ func validateSubSysConfig(s config.Config, subSys string, objAPI ObjectLayer) er
 			}
 		}
 	case config.CacheSubSys:
-		if _, err := cache.LookupConfig(s[config.CacheSubSys][config.Default]); err != nil {
+		if _, err := cache.LookupConfig(s); err != nil {
 			return err
 		}
 	case config.CompressionSubSys:
@@ -528,7 +528,7 @@ func lookupConfigs(s config.Config, objAPI ObjectLayer) {
 		getRemoteInstanceTransport = newGatewayHTTPTransport(apiConfig.RemoteTransportDeadline)
 	})
 
-	globalCacheConfig, err = cache.LookupConfig(s[config.CacheSubSys][config.Default])
+	globalCacheConfig, err = cache.LookupConfig(s)
 	if err != nil {
 		if globalIsGateway {
 			logger.FatalIf(err, "Unable to setup cache")

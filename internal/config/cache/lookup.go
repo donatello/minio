@@ -21,8 +21,8 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/minio/minio-go/v7/pkg/set"
 	"github.com/minio/minio/internal/config"
-	"github.com/minio/pkg/env"
 )
 
 // Cache ENVs
@@ -104,21 +104,22 @@ const (
 	cacheDelimiter = ","
 )
 
-// Enabled returns if cache is enabled.
-func Enabled(kvs config.KVS) bool {
-	drives := kvs.Get(Drives)
-	return drives != ""
-}
-
 // LookupConfig - extracts cache configuration provided by environment
 // variables and merge them with provided CacheConfiguration.
-func LookupConfig(kvs config.KVS) (Config, error) {
+func LookupConfig(s config.Config) (Config, error) {
 	cfg := Config{}
-	if err := config.CheckValidKeys(config.CacheSubSys, kvs, DefaultKVS); err != nil {
+
+	if err := s.CheckValidKeys(config.CacheSubSys, nil,
+		set.CreateStringSet(EnvCacheEncryptionKey)); err != nil {
 		return cfg, err
 	}
 
-	drives := env.Get(EnvCacheDrives, kvs.Get(Drives))
+	cfgGet := func(param string) string {
+		v, _ := s.ResolveConfigParam(config.CacheSubSys, "", param)
+		return v
+	}
+
+	drives := cfgGet(Drives)
 	if len(drives) == 0 {
 		return cfg, nil
 	}
@@ -130,21 +131,21 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 	}
 
 	cfg.Enabled = true
-	if excludes := env.Get(EnvCacheExclude, kvs.Get(Exclude)); excludes != "" {
+	if excludes := cfgGet(Exclude); excludes != "" {
 		cfg.Exclude, err = parseCacheExcludes(excludes)
 		if err != nil {
 			return cfg, err
 		}
 	}
 
-	if expiryStr := env.Get(EnvCacheExpiry, kvs.Get(Expiry)); expiryStr != "" {
+	if expiryStr := cfgGet(Expiry); expiryStr != "" {
 		cfg.Expiry, err = strconv.Atoi(expiryStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheExpiryValue(err)
 		}
 	}
 
-	if maxUseStr := env.Get(EnvCacheMaxUse, kvs.Get(MaxUse)); maxUseStr != "" {
+	if maxUseStr := cfgGet(MaxUse); maxUseStr != "" {
 		cfg.MaxUse, err = strconv.Atoi(maxUseStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheQuota(err)
@@ -155,7 +156,7 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 			return cfg, config.ErrInvalidCacheQuota(err)
 		}
 		cfg.Quota = cfg.MaxUse
-	} else if quotaStr := env.Get(EnvCacheQuota, kvs.Get(Quota)); quotaStr != "" {
+	} else if quotaStr := cfgGet(Quota); quotaStr != "" {
 		cfg.Quota, err = strconv.Atoi(quotaStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheQuota(err)
@@ -168,7 +169,7 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 		cfg.MaxUse = cfg.Quota
 	}
 
-	if afterStr := env.Get(EnvCacheAfter, kvs.Get(After)); afterStr != "" {
+	if afterStr := cfgGet(After); afterStr != "" {
 		cfg.After, err = strconv.Atoi(afterStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheAfter(err)
@@ -180,7 +181,7 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 		}
 	}
 
-	if lowWMStr := env.Get(EnvCacheWatermarkLow, kvs.Get(WatermarkLow)); lowWMStr != "" {
+	if lowWMStr := cfgGet(WatermarkLow); lowWMStr != "" {
 		cfg.WatermarkLow, err = strconv.Atoi(lowWMStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheWatermarkLow(err)
@@ -192,7 +193,7 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 		}
 	}
 
-	if highWMStr := env.Get(EnvCacheWatermarkHigh, kvs.Get(WatermarkHigh)); highWMStr != "" {
+	if highWMStr := cfgGet(WatermarkHigh); highWMStr != "" {
 		cfg.WatermarkHigh, err = strconv.Atoi(highWMStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheWatermarkHigh(err)
@@ -210,14 +211,14 @@ func LookupConfig(kvs config.KVS) (Config, error) {
 	}
 
 	cfg.Range = true // by default range caching is enabled.
-	if rangeStr := env.Get(EnvCacheRange, kvs.Get(Range)); rangeStr != "" {
+	if rangeStr := cfgGet(Range); rangeStr != "" {
 		rng, err := config.ParseBool(rangeStr)
 		if err != nil {
 			return cfg, config.ErrInvalidCacheRange(err)
 		}
 		cfg.Range = rng
 	}
-	if commit := env.Get(EnvCacheCommit, kvs.Get(Commit)); commit != "" {
+	if commit := cfgGet(Commit); commit != "" {
 		cfg.CacheCommitMode, err = parseCacheCommitMode(commit)
 		if err != nil {
 			return cfg, err
