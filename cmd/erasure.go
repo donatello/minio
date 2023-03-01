@@ -414,9 +414,6 @@ func (er erasureObjects) nsScanner(ctx context.Context, buckets []BucketInfo, bf
 
 		for {
 			select {
-			case <-ctx.Done():
-				// Return without saving.
-				return
 			case <-t.C:
 				if cache.Info.LastUpdate.Equal(lastSave) {
 					continue
@@ -491,10 +488,13 @@ func (er erasureObjects) nsScanner(ctx context.Context, buckets []BucketInfo, bf
 				go func(name string) {
 					defer wg.Done()
 					for update := range updates {
-						bucketResults <- dataUsageEntryInfo{
+						select {
+						case <-ctx.Done():
+						case bucketResults <- dataUsageEntryInfo{
 							Name:   name,
 							Parent: dataUsageRoot,
 							Entry:  update,
+						}:
 						}
 						if intDataUpdateTracker.debug {
 							console.Debugln("z:", er.poolIndex, "s:", er.setIndex, "bucket", name, "got update", update)
@@ -526,10 +526,14 @@ func (er erasureObjects) nsScanner(ctx context.Context, buckets []BucketInfo, bf
 					root = cache.flatten(*r)
 				}
 				t := time.Now()
-				bucketResults <- dataUsageEntryInfo{
+				select {
+				case <-ctx.Done():
+					return
+				case bucketResults <- dataUsageEntryInfo{
 					Name:   cache.Info.Name,
 					Parent: dataUsageRoot,
 					Entry:  root,
+				}:
 				}
 				// We want to avoid synchronizing up all writes in case
 				// the results are piled up.
