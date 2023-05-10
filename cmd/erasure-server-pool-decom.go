@@ -782,6 +782,11 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 					continue
 				}
 
+				if bi.Name == minioMetaBucket && strings.Contains(version.Name, dataUsageCacheName) {
+					// skipping bucket usage cache name
+					continue
+				}
+
 				// We will skip decommissioning delete markers
 				// with single version, its as good as there
 				// is no data associated with the object.
@@ -993,17 +998,80 @@ func (z *erasureServerPools) checkAfterDecom(ctx context.Context, idx int) error
 	pool := z.serverPools[idx]
 	for _, set := range pool.sets {
 		for _, bi := range buckets {
-			var objectsFound int
+			vc, _ := globalBucketVersioningSys.Get(bi.Name)
+
+			// Check if the current bucket has a configured lifecycle policy
+			lc, _ := globalLifecycleSys.Get(bi.Name)
+
+			// Check if bucket is object locked.
+			lr, _ := globalBucketObjectLockSys.Get(bi.Name)
+
+			filterLifecycle := func(bucket, object string, fi FileInfo) bool {
+				if lc == nil {
+					return false
+				}
+				versioned := vc != nil && vc.Versioned(object)
+				objInfo := fi.ToObjectInfo(bucket, object, versioned)
+				evt := evalActionFromLifecycle(ctx, *lc, lr, objInfo)
+				switch evt.Action {
+				case lifecycle.DeleteVersionAction, lifecycle.DeleteAction:
+					globalExpiryState.enqueueByDays(objInfo, false, evt.Action == lifecycle.DeleteVersionAction)
+					// Skip this entry.
+					return true
+				case lifecycle.DeleteRestoredAction, lifecycle.DeleteRestoredVersionAction:
+					globalExpiryState.enqueueByDays(objInfo, true, evt.Action == lifecycle.DeleteRestoredVersionAction)
+					// Skip this entry.
+					return true
+				}
+				return false
+			}
+
+			var versionsFound int
 			err := set.listObjectsToDecommission(ctx, bi, func(entry metaCacheEntry) {
-				if entry.isObject() {
-					objectsFound++
+				if !entry.isObject() {
+					return
+				}
+
+				fivs, err := entry.fileInfoVersions(bi.Name)
+				if err != nil {
+					return
+				}
+
+				// We need a reversed order for decommissioning,
+				// to create the appropriate stack.
+				versionsSorter(fivs.Versions).reverse()
+
+				for _, version := range fivs.Versions {
+					if version.IsRemote() {
+						continue
+					}
+
+					// Apply lifecycle rules on the objects that are expired.
+					if filterLifecycle(bi.Name, version.Name, version) {
+						continue
+					}
+
+					if bi.Name == minioMetaBucket && strings.Contains(version.Name, dataUsageCacheName) {
+						// skipping bucket usage cache name
+						continue
+					}
+
+					// We will skip decommissioning delete markers
+					// with single version, its as good as there
+					// is no data associated with the object.
+					if version.Deleted && len(fivs.Versions) == 1 {
+						continue
+					}
+
+					versionsFound++
 				}
 			})
 			if err != nil {
 				return err
 			}
-			if objectsFound > 0 {
-				return fmt.Errorf("at least %d objects were found in bucket `%s` after decommissioning", objectsFound, bi.Name)
+
+			if versionsFound > 0 {
+				return fmt.Errorf("at least %d object(s)/version(s) were found in bucket `%s` after decommissioning", versionsFound, bi.Name)
 			}
 		}
 	}
