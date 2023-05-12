@@ -1316,7 +1316,7 @@ func (z *erasureServerPools) ListObjects(ctx context.Context, bucket, prefix, ma
 	}
 	opts.setBucketMeta(ctx)
 
-	if len(prefix) > 0 && maxKeys == 1 && delimiter == "" && marker == "" {
+	if len(prefix) > 0 && maxKeys == 1 && marker == "" {
 		// Optimization for certain applications like
 		// - Cohesity
 		// - Actifio, Splunk etc.
@@ -2126,6 +2126,7 @@ type HealthResult struct {
 	HealingDrives int
 	PoolID, SetID int
 	WriteQuorum   int
+	UsingDefaults bool
 }
 
 // ReadHealth returns if the cluster can serve read requests
@@ -2219,6 +2220,11 @@ func (z *erasureServerPools) Health(ctx context.Context, opts HealthOptions) Hea
 		}
 	}
 
+	var usingDefaults bool
+	if globalStorageClass.GetParityForSC(storageclass.STANDARD) < 0 {
+		usingDefaults = true
+	}
+
 	for poolIdx := range erasureSetUpCount {
 		for setIdx := range erasureSetUpCount[poolIdx] {
 			if erasureSetUpCount[poolIdx][setIdx] < poolWriteQuorums[poolIdx] {
@@ -2231,6 +2237,7 @@ func (z *erasureServerPools) Health(ctx context.Context, opts HealthOptions) Hea
 					PoolID:        poolIdx,
 					SetID:         setIdx,
 					WriteQuorum:   poolWriteQuorums[poolIdx],
+					UsingDefaults: usingDefaults, // indicates if config was not initialized and we are using defaults on this node.
 				}
 			}
 		}
@@ -2250,8 +2257,9 @@ func (z *erasureServerPools) Health(ctx context.Context, opts HealthOptions) Hea
 	// to look at the healing side of the code.
 	if !opts.Maintenance {
 		return HealthResult{
-			Healthy:     true,
-			WriteQuorum: maximumWriteQuorum,
+			Healthy:       true,
+			WriteQuorum:   maximumWriteQuorum,
+			UsingDefaults: usingDefaults, // indicates if config was not initialized and we are using defaults on this node.
 		}
 	}
 
@@ -2259,6 +2267,7 @@ func (z *erasureServerPools) Health(ctx context.Context, opts HealthOptions) Hea
 		Healthy:       len(aggHealStateResult.HealDisks) == 0,
 		HealingDrives: len(aggHealStateResult.HealDisks),
 		WriteQuorum:   maximumWriteQuorum,
+		UsingDefaults: usingDefaults, // indicates if config was not initialized and we are using defaults on this node.
 	}
 }
 
