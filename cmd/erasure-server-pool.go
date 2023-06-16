@@ -402,6 +402,12 @@ type PoolObjInfo struct {
 	Err     error
 }
 
+// isErrReadQuorum check if the error type is InsufficentReadQuorum
+func isErrReadQuorum(err error) bool {
+	var rquorum InsufficientReadQuorum
+	return errors.As(err, &rquorum)
+}
+
 func (z *erasureServerPools) getPoolInfoExistingWithOpts(ctx context.Context, bucket, object string, opts ObjectOptions) (PoolObjInfo, error) {
 	poolObjInfos := make([]PoolObjInfo, len(z.serverPools))
 	poolOpts := make([]ObjectOptions, len(z.serverPools))
@@ -437,34 +443,48 @@ func (z *erasureServerPools) getPoolInfoExistingWithOpts(ctx context.Context, bu
 		return mtime1.After(mtime2)
 	})
 
+	defPool := PoolObjInfo{Index: -1}
 	for _, pinfo := range poolObjInfos {
 		// skip all objects from suspended pools if asked by the
 		// caller.
-		if z.IsSuspended(pinfo.Index) && opts.SkipDecommissioned {
+		if opts.SkipDecommissioned && z.IsSuspended(pinfo.Index) {
 			continue
 		}
 		// Skip object if it's from pools participating in a rebalance operation.
 		if opts.SkipRebalancing && z.IsPoolRebalancing(pinfo.Index) {
 			continue
 		}
-
-		if pinfo.Err != nil && !isErrObjectNotFound(pinfo.Err) {
+		if pinfo.Err == nil {
+			// found a pool
+			return pinfo, nil
+		}
+		if isErrReadQuorum(pinfo.Err) {
+			// read quorum is returned when the object is visibly
+			// present but its unreadable, we simply ask the writes to
+			// schedule to this pool instead. If there is no quorum
+			// it will fail anyways, however if there is quorum available
+			// with enough disks online but sufficiently inconsistent to
+			// break parity threshold, allow them to be overwritten
+			// or allow new versions to be added.
+			return pinfo, nil
+		}
+		defPool = pinfo
+		if !isErrObjectNotFound(pinfo.Err) {
 			return pinfo, pinfo.Err
 		}
 
-		if isErrObjectNotFound(pinfo.Err) {
-			// No object exists or its a delete marker,
-			// check objInfo to confirm.
-			if pinfo.ObjInfo.DeleteMarker && pinfo.ObjInfo.Name != "" {
-				return pinfo, nil
-			}
-
-			// objInfo is not valid, truly the object doesn't
-			// exist proceed to next pool.
-			continue
+		// No object exists or its a delete marker,
+		// check objInfo to confirm.
+		if pinfo.ObjInfo.DeleteMarker && pinfo.ObjInfo.Name != "" {
+			return pinfo, nil
 		}
+	}
 
-		return pinfo, nil
+	if opts.ReplicationRequest && opts.DeleteMarker && defPool.Index >= 0 {
+		// If the request is a delete marker replication request, return a default pool
+		// in cases where the object does not exist.
+		// This is to ensure that the delete marker is replicated to the destination.
+		return defPool, nil
 	}
 
 	return PoolObjInfo{}, toObjectErr(errFileNotFound, bucket, object)
