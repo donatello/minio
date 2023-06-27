@@ -62,10 +62,10 @@ type PoolDecommissionInfo struct {
 	Object string `json:"-" msg:"obj"`
 
 	// Verbose information
-	ItemsDecommissioned     int64 `json:"-" msg:"id"`
-	ItemsDecommissionFailed int64 `json:"-" msg:"idf"`
-	BytesDone               int64 `json:"-" msg:"bd"`
-	BytesFailed             int64 `json:"-" msg:"bf"`
+	ItemsDecommissioned     int64 `json:"objectsDecommissioned" msg:"id"`
+	ItemsDecommissionFailed int64 `json:"objectsDecommissionedFailed" msg:"idf"`
+	BytesDone               int64 `json:"bytesDecommissioned" msg:"bd"`
+	BytesFailed             int64 `json:"bytesDecommissionedFailed" msg:"bf"`
 }
 
 // bucketPop should be called when a bucket is done decommissioning.
@@ -738,11 +738,12 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 					logger.LogIf(ctx, fmt.Errorf("found %s/%s transitioned object, transitioned object won't be decommissioned", bi.Name, version.Name))
 					continue
 				}
-
+				stopFn := globalDecommissionMetrics.log(decomMetricDecommissionObject, idx, bi.Name, version.Name, version.VersionID)
 				// Apply lifecycle rules on the objects that are expired.
 				if filterLifecycle(bi.Name, version.Name, version) {
 					expired++
 					decommissioned++
+					stopFn(errors.New("ILM expired object/version will be skipped"))
 					continue
 				}
 
@@ -757,6 +758,7 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 				remainingVersions := len(fivs.Versions) - expired
 				if version.Deleted && remainingVersions == 1 {
 					decommissioned++
+					stopFn(errors.New("DELETE marked object with no other non-current versions will be skipped"))
 					continue
 				}
 
@@ -781,7 +783,13 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 							SkipDecommissioned: true, // make sure we skip the decommissioned pool
 						})
 					var failure bool
-					if err != nil && !isErrObjectNotFound(err) && !isErrVersionNotFound(err) {
+					if err != nil {
+						if isErrObjectNotFound(err) || isErrVersionNotFound(err) {
+							err = nil
+						}
+					}
+					stopFn(err)
+					if err != nil {
 						logger.LogIf(ctx, err)
 						failure = true
 					}
