@@ -690,7 +690,9 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 	// Check if bucket is object locked.
 	lr, _ := globalBucketObjectLockSys.Get(bi.Name)
 
-	for _, set := range pool.sets {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for setIdx, set := range pool.sets {
 		set := set
 
 		filterLifecycle := func(bucket, object string, fi FileInfo) bool {
@@ -877,18 +879,26 @@ func (z *erasureServerPools) decommissionPool(ctx context.Context, idx int, pool
 		}
 
 		wg.Add(1)
-		go func() {
+		go func(setIdx int) {
 			defer wg.Done()
-			err := set.listObjectsToDecommission(ctx, bi,
-				func(entry metaCacheEntry) {
-					// Wait must be synchronized here.
-					wg.Add(1)
-					parallelWorkers <- struct{}{}
-					go decommissionEntry(entry)
-				},
-			)
-			logger.LogIf(ctx, err)
-		}()
+			for {
+				err := set.listObjectsToDecommission(ctx, bi,
+					func(entry metaCacheEntry) {
+						// Wait must be synchronized here.
+						wg.Add(1)
+						parallelWorkers <- struct{}{}
+						go decommissionEntry(entry)
+					},
+				)
+				if err == nil {
+					break
+				}
+				setN := humanize.Ordinal(setIdx + 1)
+				retryDur := time.Duration(r.Float64() * float64(5*time.Second))
+				logger.LogOnceIf(ctx, fmt.Errorf("listing objects from %s set failed with %v, retrying in %v", setN, err, retryDur), "decom-listing-failed"+setN)
+				time.Sleep(retryDur)
+			}
+		}(setIdx)
 	}
 	wg.Wait()
 	return nil
