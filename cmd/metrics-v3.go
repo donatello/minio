@@ -18,17 +18,19 @@
 package cmd
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/minio/minio/internal/logger"
 	"github.com/minio/minio/internal/mcontext"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
-	poolIndex                                    = "poolIndex"
+	poolIndex                                    = "pool_index"
 	apiMetricNamespace           MetricNamespace = "minio_api"
 	apiObjectMetricsNamespace    MetricNamespace = "minio_obj"
 	processMetricsNamespace      MetricNamespace = "minio_process"
@@ -51,90 +53,68 @@ func init() {
 	nodeReplCollectorV3 = newMinioReplCollectorNodeV3(nodeReplicationMetricsGroupV3)
 }
 
-// metricsV3DebugHandler is the prometheus handler for debug metrics
-func metricsV3DebugHandler() http.Handler {
-	registry := prometheus.NewRegistry()
-
-	if err := registry.Register(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-		Namespace:    minioNamespace,
-		ReportErrors: true,
-	})); err != nil {
-		logger.CriticalIf(GlobalContext, err)
-	}
-	if err := registry.Register(collectors.NewGoCollector()); err != nil {
-		logger.CriticalIf(GlobalContext, err)
-	}
-	gatherers := prometheus.Gatherers{
-		registry,
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tc, ok := r.Context().Value(mcontext.ContextTraceKey).(*mcontext.TraceCtxt)
-		if ok {
-			tc.FuncName = "handler.MetricsV3Debug"
-			tc.ResponseRecorder.LogErrBody = true
-		}
-
-		mfs, err := gatherers.Gather()
-		if err != nil {
-			if len(mfs) == 0 {
-				writeErrorResponseJSON(r.Context(), w, toAdminAPIErr(r.Context(), err), r.URL)
-				return
-			}
-		}
-
-		contentType := expfmt.Negotiate(r.Header)
-		w.Header().Set("Content-Type", string(contentType))
-
-		enc := expfmt.NewEncoder(w, contentType)
-		for _, mf := range mfs {
-			if err := enc.Encode(mf); err != nil {
-				logger.LogIf(r.Context(), err)
-				return
-			}
-		}
-		if closer, ok := enc.(expfmt.Closer); ok {
-			closer.Close()
-		}
-	})
+type promLogger struct {
 }
 
-func metricsNodeV3Handler() http.Handler {
-	registry := prometheus.NewRegistry()
-
-	logger.CriticalIf(GlobalContext, registry.Register(nodeReplCollectorV3))
-
-	gatherers := prometheus.Gatherers{
-		registry,
+func (p promLogger) Println(v ...interface{}) {
+	s := make([]string, 0, len(v))
+	for _, val := range v {
+		s = append(s, fmt.Sprintf("%v", val))
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	err := fmt.Errorf("metrics handler error: %v", strings.Join(s, " "))
+	logger.LogIf(GlobalContext, err)
+}
+
+type v3MetricsHandler struct {
+	registry *prometheus.Registry
+	opts     promhttp.HandlerOpts
+	authFn   func(http.Handler) http.Handler
+}
+
+func newV3MetricsHandler(authType prometheusAuthType) *v3MetricsHandler {
+	registry := prometheus.NewRegistry()
+	authFn := AuthMiddleware
+	if prometheusAuthType(authType) == prometheusPublic {
+		authFn = NoAuthMiddleware
+	}
+	return &v3MetricsHandler{
+		registry: registry,
+		opts: promhttp.HandlerOpts{
+			ErrorLog:            promLogger{},
+			ErrorHandling:       promhttp.HTTPErrorOnError,
+			Registry:            registry,
+			MaxRequestsInFlight: 2,
+		},
+		authFn: authFn,
+	}
+}
+
+// handlerFor returns a http.Handler for the given prometheus.Collector(s) under
+// the given handlerName.
+func (h *v3MetricsHandler) handlerFor(handlerName string, cs ...prometheus.Collector) http.Handler {
+	subRegistry := prometheus.NewRegistry()
+	logger.CriticalIf(GlobalContext, h.registry.Register(subRegistry))
+	for _, c := range cs {
+		logger.CriticalIf(GlobalContext, subRegistry.Register(c))
+	}
+
+	promHandler := promhttp.HandlerFor(subRegistry, h.opts)
+
+	// Add tracing to the prom. handler
+	tracedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Second)
 		tc, ok := r.Context().Value(mcontext.ContextTraceKey).(*mcontext.TraceCtxt)
 		if ok {
-			tc.FuncName = "handler.MetricsNode"
+			tc.FuncName = handlerName
 			tc.ResponseRecorder.LogErrBody = true
 		}
 
-		mfs, err := gatherers.Gather()
-		if err != nil {
-			if len(mfs) == 0 {
-				writeErrorResponseJSON(r.Context(), w, toAdminAPIErr(r.Context(), err), r.URL)
-				return
-			}
-		}
-
-		contentType := expfmt.Negotiate(r.Header)
-		w.Header().Set("Content-Type", string(contentType))
-
-		enc := expfmt.NewEncoder(w, contentType)
-		for _, mf := range mfs {
-			if err := enc.Encode(mf); err != nil {
-				logger.LogIf(r.Context(), err)
-				return
-			}
-		}
-		if closer, ok := enc.(expfmt.Closer); ok {
-			closer.Close()
-		}
+		promHandler.ServeHTTP(w, r)
 	})
+
+	// Add authentication
+	return h.authFn(tracedHandler)
+
 }
 
 // minioNodeReplCollectorV3 is the Custom Collector

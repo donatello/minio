@@ -22,14 +22,18 @@ import (
 
 	"github.com/minio/mux"
 	"github.com/minio/pkg/v2/env"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 const (
-	prometheusMetricsPathLegacy               = "/prometheus/metrics"
-	prometheusMetricsV2ClusterPath            = "/v2/metrics/cluster"
-	prometheusMetricsV2BucketPath             = "/v2/metrics/bucket"
-	prometheusMetricsV2NodePath               = "/v2/metrics/node"
-	prometheusMetricsV2ResourcePath           = "/v2/metrics/resource"
+	// Legacy metrics endpoints
+	prometheusMetricsPathLegacy     = "/prometheus/metrics"
+	prometheusMetricsV2ClusterPath  = "/v2/metrics/cluster"
+	prometheusMetricsV2BucketPath   = "/v2/metrics/bucket"
+	prometheusMetricsV2NodePath     = "/v2/metrics/node"
+	prometheusMetricsV2ResourcePath = "/v2/metrics/resource"
+
+	// Metrics v3 endpoints
 	prometheusMetricsV3APIPath                = "/v3/metrics/api"
 	prometheusMetricsV3APIObjectPath          = "/v3/metrics/api/object"
 	prometheusMetricsV3APIBucketPath          = "/v3/metrics/api/bucket"
@@ -55,10 +59,10 @@ const (
 func registerMetricsRouter(router *mux.Router) {
 	// metrics router
 	metricsRouter := router.NewRoute().PathPrefix(minioReservedBucketPath).Subrouter()
-	authType := strings.ToLower(env.Get(EnvPrometheusAuthType, string(prometheusJWT)))
+	authType := prometheusAuthType(strings.ToLower(env.Get(EnvPrometheusAuthType, string(prometheusJWT))))
 
 	auth := AuthMiddleware
-	if prometheusAuthType(authType) == prometheusPublic {
+	if authType == prometheusPublic {
 		auth = NoAuthMiddleware
 	}
 	metricsRouter.Handle(prometheusMetricsPathLegacy, auth(metricsHandler()))
@@ -66,10 +70,25 @@ func registerMetricsRouter(router *mux.Router) {
 	metricsRouter.Handle(prometheusMetricsV2BucketPath, auth(metricsBucketHandler()))
 	metricsRouter.Handle(prometheusMetricsV2NodePath, auth(metricsNodeHandler()))
 	metricsRouter.Handle(prometheusMetricsV2ResourcePath, auth(metricsResourceHandler()))
-	metricsRouter.Handle(prometheusMetricsV3APIPath, auth(metricsV3APIHandler()))
-	metricsRouter.Handle(prometheusMetricsV3APIObjectPath, auth(metricsV3APIObjectHandler()))
-	metricsRouter.Handle(prometheusMetricsV3APIBucketPath, auth(metricsV3APIBucketHandler()))
-	metricsRouter.Handle(prometheusMetricsV3DebugPath, auth(metricsV3DebugHandler()))
-	metricsRouter.Handle(prometheusMetricsV3BucketReplicationPath, auth(metricsV3BucketReplHandler()))
-	metricsRouter.Handle(prometheusMetricsV3NodePath, auth(metricsNodeV3Handler()))
+
+	// Metrics v3!
+	v3h := newV3MetricsHandler(authType)
+	metricsRouter.Handle(prometheusMetricsV3APIPath,
+		v3h.handlerFor("handler.MetricsV3API", apiCollector))
+	metricsRouter.Handle(prometheusMetricsV3APIObjectPath,
+		v3h.handlerFor("handler.MetricsV3APIObject", apiObjectCollector))
+	metricsRouter.Handle(prometheusMetricsV3APIBucketPath,
+		v3h.handlerFor("handler.MetricsV3APIBucket", apiBucketCollector))
+	metricsRouter.Handle(prometheusMetricsV3DebugPath,
+		v3h.handlerFor("handler.MetricsV3Debug",
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+				Namespace:    minioNamespace,
+				ReportErrors: true,
+			}),
+			collectors.NewGoCollector(),
+		))
+	metricsRouter.Handle(prometheusMetricsV3BucketReplicationPath,
+		v3h.handlerFor("handler.MetricsV3APIBucketReplication", apiBucketReplCollector))
+	metricsRouter.Handle(prometheusMetricsV3NodePath,
+		v3h.handlerFor("handler.MetricsV3Node", nodeReplCollectorV3))
 }

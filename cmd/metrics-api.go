@@ -19,7 +19,6 @@ package cmd
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -73,6 +72,7 @@ func (c *minioAPICollector) Collect(ch chan<- prometheus.Metric) {
 	// Expose MinIO's version information
 	minioVersionInfo.WithLabelValues(Version, CommitID).Set(1.0)
 
+	fmt.Printf("Collect called on: %s %#v\n", c.desc, c)
 	populateAndPublish(c.metricsGroups, func(metric Metric) bool {
 		fmt.Println("Collecting metric", metric.Description.Name, metric.Description.Help, metric.Description.Type, metric.Value, metric.VariableLabels, metric.StaticLabels)
 		labels, values := getOrderedLabelValueArrays(metric.VariableLabels)
@@ -130,28 +130,4 @@ func newMinioAPICollector(metricsGroups []*MetricsGroup) *minioAPICollector {
 		metricsGroups: metricsGroups,
 		desc:          prometheus.NewDesc("minio_api_stats", "API statistics exposed by MinIO server", nil, nil),
 	}
-}
-
-// metricsV3APIHandler is the prometheus handler for resource metrics
-func metricsV3APIHandler() http.Handler {
-	fmt.Println("metricsAPI handler  setup to apiCollect")
-
-	return metricsHTTPHandler(apiCollector, "handler.MetricsV3API")
-}
-
-// metricsV3APIObjectHandler is the prometheus handler for resource metrics
-func metricsV3APIObjectHandler() http.Handler {
-	return metricsHTTPHandler(apiObjectCollector, "handler.MetricsV3APIObject")
-}
-
-// metricsV3APIBucketHandler is the prometheus handler for bucket metrics
-func metricsV3APIBucketHandler() http.Handler {
-	fmt.Println("metricsAPIBucket handler  setup to apiBucketCollect")
-	return metricsHTTPHandler(apiBucketCollector, "handler.MetricsV3APIBucket")
-}
-
-// metricsV3BucketReplHandler is the prometheus handler for bucket replication metrics
-func metricsV3BucketReplHandler() http.Handler {
-	fmt.Println("metricsAPIBucketRepl handler  setup to apiBucketReplCollect")
-	return metricsHTTPHandler(apiBucketReplCollector, "handler.MetricsV3APIBucketRepl")
 }

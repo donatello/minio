@@ -3353,6 +3353,7 @@ func getBucketUsageMetrics(opts MetricsGroupOpts) *MetricsGroup {
 				}
 			}
 			if !opts.replicationOnlyV3 {
+				fmt.Printf("called here!\n")
 				metrics = append(metrics, Metric{
 					Description:          getBucketObjectDistributionMD(),
 					Histogram:            usage.ObjectSizesHistogram,
@@ -3367,6 +3368,9 @@ func getBucketUsageMetrics(opts MetricsGroupOpts) *MetricsGroup {
 					VariableLabels:       map[string]string{"bucket": bucket},
 				})
 			}
+		}
+		for i, m := range metrics {
+			fmt.Printf("%d: %#v\n", i, m)
 		}
 		return
 	})
